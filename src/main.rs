@@ -247,7 +247,7 @@ fn merge_compare(
         .or(file.direction)
         .unwrap_or(DirectionArg::Download);
     let concurrency = args.concurrency.or(file.concurrency).unwrap_or(256);
-    let duration = args.duration.or(file.duration).unwrap_or(30);
+    let duration = args.duration.or(file.duration).unwrap_or(10);
     let prefix = args
         .prefix
         .clone()
@@ -322,8 +322,27 @@ struct BackendRunResult {
     bytes: u64,
     transfers: u64,
     successes: u64,
+    http_non_success: u64,
+    network_errors: u64,
+    http_4xx: u64,
+    http_429: u64,
+    http_5xx: u64,
     throughput_gbps: f64,
     grade: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RunOutcome {
+    bytes: u64,
+    transfers: u64,
+    successes: u64,
+    http_non_success: u64,
+    network_errors: u64,
+    http_4xx: u64,
+    http_429: u64,
+    http_5xx: u64,
+    throughput_gbps: f64,
+    elapsed_secs: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -941,12 +960,17 @@ async fn run_download(
     urls: Arc<Vec<String>>,
     cfg: &RunConfig,
     label: &str,
-) -> Result<(u64, u64, u64, f64, f64)> {
+) -> Result<RunOutcome> {
     let sem = Arc::new(Semaphore::new(cfg.concurrency));
     let idx = Arc::new(AtomicUsize::new(0));
     let bytes = Arc::new(AtomicU64::new(0));
     let transfers = Arc::new(AtomicU64::new(0));
     let successes = Arc::new(AtomicU64::new(0));
+    let http_non_success = Arc::new(AtomicU64::new(0));
+    let network_errors = Arc::new(AtomicU64::new(0));
+    let http_4xx = Arc::new(AtomicU64::new(0));
+    let http_429 = Arc::new(AtomicU64::new(0));
+    let http_5xx = Arc::new(AtomicU64::new(0));
 
     let start = Instant::now();
     let until = start + Duration::from_secs(cfg.duration_secs);
@@ -995,6 +1019,11 @@ async fn run_download(
         let bytes = bytes.clone();
         let transfers = transfers.clone();
         let successes = successes.clone();
+        let http_non_success = http_non_success.clone();
+        let network_errors = network_errors.clone();
+        let http_4xx = http_4xx.clone();
+        let http_429 = http_429.clone();
+        let http_5xx = http_5xx.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
@@ -1004,9 +1033,19 @@ async fn run_download(
 
             let resp = http.get(url).send().await;
             let Ok(resp) = resp else {
+                network_errors.fetch_add(1, Ordering::Relaxed);
                 return;
             };
             if !resp.status().is_success() {
+                http_non_success.fetch_add(1, Ordering::Relaxed);
+                let code = resp.status().as_u16();
+                if code == 429 {
+                    http_429.fetch_add(1, Ordering::Relaxed);
+                } else if (400..500).contains(&code) {
+                    http_4xx.fetch_add(1, Ordering::Relaxed);
+                } else if (500..600).contains(&code) {
+                    http_5xx.fetch_add(1, Ordering::Relaxed);
+                }
                 return;
             }
 
@@ -1047,20 +1086,37 @@ async fn run_download(
     let total_bytes = bytes.load(Ordering::Relaxed);
     let total_transfers = transfers.load(Ordering::Relaxed);
     let total_success = successes.load(Ordering::Relaxed);
+    let total_http_non_success = http_non_success.load(Ordering::Relaxed);
+    let total_network_errors = network_errors.load(Ordering::Relaxed);
+    let total_http_4xx = http_4xx.load(Ordering::Relaxed);
+    let total_http_429 = http_429.load(Ordering::Relaxed);
+    let total_http_5xx = http_5xx.load(Ordering::Relaxed);
     let gbps = (total_bytes as f64 * 8.0) / elapsed / 1_000_000_000.0;
-    Ok((total_bytes, total_transfers, total_success, gbps, elapsed))
+    Ok(RunOutcome {
+        bytes: total_bytes,
+        transfers: total_transfers,
+        successes: total_success,
+        http_non_success: total_http_non_success,
+        network_errors: total_network_errors,
+        http_4xx: total_http_4xx,
+        http_429: total_http_429,
+        http_5xx: total_http_5xx,
+        throughput_gbps: gbps,
+        elapsed_secs: elapsed,
+    })
 }
 
-async fn run_upload(
-    http: &HttpClient,
-    b: &Backend,
-    cfg: &RunConfig,
-) -> Result<(u64, u64, u64, f64, f64)> {
+async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<RunOutcome> {
     let sem = Arc::new(Semaphore::new(cfg.concurrency));
     let idx = Arc::new(AtomicUsize::new(0));
     let bytes = Arc::new(AtomicU64::new(0));
     let transfers = Arc::new(AtomicU64::new(0));
     let successes = Arc::new(AtomicU64::new(0));
+    let http_non_success = Arc::new(AtomicU64::new(0));
+    let network_errors = Arc::new(AtomicU64::new(0));
+    let http_4xx = Arc::new(AtomicU64::new(0));
+    let http_429 = Arc::new(AtomicU64::new(0));
+    let http_5xx = Arc::new(AtomicU64::new(0));
 
     let payload = Bytes::from(vec![0u8; cfg.file_size_mb * 1024 * 1024]);
     let payload_hash = sha256_hex(&payload);
@@ -1087,6 +1143,11 @@ async fn run_upload(
         let bytes = bytes.clone();
         let transfers = transfers.clone();
         let successes = successes.clone();
+        let http_non_success = http_non_success.clone();
+        let network_errors = network_errors.clone();
+        let http_4xx = http_4xx.clone();
+        let http_429 = http_429.clone();
+        let http_5xx = http_5xx.clone();
         let payload = payload.clone();
         let payload_hash = payload_hash.clone();
         let prefix = prefix.clone();
@@ -1114,11 +1175,23 @@ async fn run_upload(
             }
             let resp = req.body(payload).send().await;
             let Ok(resp) = resp else {
+                network_errors.fetch_add(1, Ordering::Relaxed);
                 return;
             };
             if resp.status().is_success() {
                 bytes.fetch_add(bytes_per, Ordering::Relaxed);
                 successes.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+
+            http_non_success.fetch_add(1, Ordering::Relaxed);
+            let code = resp.status().as_u16();
+            if code == 429 {
+                http_429.fetch_add(1, Ordering::Relaxed);
+            } else if (400..500).contains(&code) {
+                http_4xx.fetch_add(1, Ordering::Relaxed);
+            } else if (500..600).contains(&code) {
+                http_5xx.fetch_add(1, Ordering::Relaxed);
             }
         }));
 
@@ -1142,8 +1215,24 @@ async fn run_upload(
     let total_bytes = bytes.load(Ordering::Relaxed);
     let total_transfers = transfers.load(Ordering::Relaxed);
     let total_success = successes.load(Ordering::Relaxed);
+    let total_http_non_success = http_non_success.load(Ordering::Relaxed);
+    let total_network_errors = network_errors.load(Ordering::Relaxed);
+    let total_http_4xx = http_4xx.load(Ordering::Relaxed);
+    let total_http_429 = http_429.load(Ordering::Relaxed);
+    let total_http_5xx = http_5xx.load(Ordering::Relaxed);
     let gbps = (total_bytes as f64 * 8.0) / elapsed / 1_000_000_000.0;
-    Ok((total_bytes, total_transfers, total_success, gbps, elapsed))
+    Ok(RunOutcome {
+        bytes: total_bytes,
+        transfers: total_transfers,
+        successes: total_success,
+        http_non_success: total_http_non_success,
+        network_errors: total_network_errors,
+        http_4xx: total_http_4xx,
+        http_429: total_http_429,
+        http_5xx: total_http_5xx,
+        throughput_gbps: gbps,
+        elapsed_secs: elapsed,
+    })
 }
 
 fn ansi(color: &str, s: &str) -> String {
@@ -1221,6 +1310,12 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         results.config.file_size_mb
     );
 
+    println!("Legend:");
+    println!("- thrpt: goodput in Gbps (only successful bytes)");
+    println!("- bytes: successful bytes transferred");
+    println!("- ok/req: successful requests / attempted requests");
+    println!("- errs: errors during request send + HTTP status buckets\n");
+
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
     }
@@ -1271,20 +1366,42 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         let rate = fmt_rate(r.successes, r.transfers);
         let gb = (r.bytes as f64) / 1_000_000_000.0;
         println!(
-            "{:<8} {:<24} {:>6.2}Gbps {:<3} ok {}/{} ({})  {:.1}GB  {}",
+            "{:<8} {:<24} region={:<12} thrpt={:>5.2}Gbps {:<3} bytes={:>5.1}GB",
             match r.direction {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
             },
             id,
+            region,
             r.throughput_gbps,
             grade,
+            gb,
+        );
+
+        let other_http = r
+            .http_non_success
+            .saturating_sub(r.http_4xx)
+            .saturating_sub(r.http_429)
+            .saturating_sub(r.http_5xx);
+        println!(
+            "         {:<24} ok/req={}/{} ({})  errs: net={} http4xx={} http429={} http5xx={} other_http={}",
+            "",
             ok,
             tot,
             rate,
-            gb,
-            region,
+            fmt_u64_compact(r.network_errors),
+            fmt_u64_compact(r.http_4xx),
+            fmt_u64_compact(r.http_429),
+            fmt_u64_compact(r.http_5xx),
+            fmt_u64_compact(other_http),
         );
+
+        if r.http_429 > 0 {
+            println!(
+                "         {:<24} note: HTTP 429 suggests rate limiting; goodput may be capped",
+                "",
+            );
+        }
     }
 
     for dir in [Direction::Download, Direction::Upload] {
@@ -1366,10 +1483,10 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
 }
 
 fn print_csv(results: &CompareResult) {
-    println!("timestamp,backend_type,name,bucket,region_or_account,direction,concurrency,duration_s,file_count,file_size_mb,bytes,transfers,successes,throughput_gbps,grade");
+    println!("timestamp,backend_type,name,bucket,region_or_account,direction,concurrency,duration_s,file_count,file_size_mb,bytes,transfers,successes,network_errors,http_non_success,http_4xx,http_429,http_5xx,throughput_gbps,grade");
     for r in &results.results {
         println!(
-            "{},{:?},{},{},{},{},{},{:.3},{},{},{},{},{},{:.6},{}",
+            "{},{:?},{},{},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{:.6},{}",
             r.timestamp.to_rfc3339(),
             r.backend_type,
             r.name,
@@ -1386,6 +1503,11 @@ fn print_csv(results: &CompareResult) {
             r.bytes,
             r.transfers,
             r.successes,
+            r.network_errors,
+            r.http_non_success,
+            r.http_4xx,
+            r.http_429,
+            r.http_5xx,
             r.throughput_gbps,
             r.grade
         );
@@ -1505,8 +1627,7 @@ async fn main() -> Result<()> {
             }
 
             let started = Utc::now();
-            let (bytes, transfers, successes, gbps, elapsed) =
-                run_download(&http, Arc::new(urls), &cfg, &format!("{}", b.spec.name)).await?;
+            let o = run_download(&http, Arc::new(urls), &cfg, &format!("{}", b.spec.name)).await?;
             all_results.push(BackendRunResult {
                 timestamp: started,
                 backend_type: b.spec.backend_type,
@@ -1515,18 +1636,23 @@ async fn main() -> Result<()> {
                 region_or_account: b.spec.region_or_account.clone(),
                 direction: Direction::Download,
                 concurrency: cfg.concurrency,
-                duration_secs: elapsed,
-                bytes,
-                transfers,
-                successes,
-                throughput_gbps: gbps,
-                grade: grade(gbps).to_string(),
+                duration_secs: o.elapsed_secs,
+                bytes: o.bytes,
+                transfers: o.transfers,
+                successes: o.successes,
+                http_non_success: o.http_non_success,
+                network_errors: o.network_errors,
+                http_4xx: o.http_4xx,
+                http_429: o.http_429,
+                http_5xx: o.http_5xx,
+                throughput_gbps: o.throughput_gbps,
+                grade: grade(o.throughput_gbps).to_string(),
             });
         }
 
         if matches!(direction, DirectionArg::Upload | DirectionArg::Both) {
             let started = Utc::now();
-            let (bytes, transfers, successes, gbps, elapsed) = run_upload(&http, b, &cfg).await?;
+            let o = run_upload(&http, b, &cfg).await?;
             all_results.push(BackendRunResult {
                 timestamp: started,
                 backend_type: b.spec.backend_type,
@@ -1535,12 +1661,17 @@ async fn main() -> Result<()> {
                 region_or_account: b.spec.region_or_account.clone(),
                 direction: Direction::Upload,
                 concurrency: cfg.concurrency,
-                duration_secs: elapsed,
-                bytes,
-                transfers,
-                successes,
-                throughput_gbps: gbps,
-                grade: grade(gbps).to_string(),
+                duration_secs: o.elapsed_secs,
+                bytes: o.bytes,
+                transfers: o.transfers,
+                successes: o.successes,
+                http_non_success: o.http_non_success,
+                network_errors: o.network_errors,
+                http_4xx: o.http_4xx,
+                http_429: o.http_429,
+                http_5xx: o.http_5xx,
+                throughput_gbps: o.throughput_gbps,
+                grade: grade(o.throughput_gbps).to_string(),
             });
         }
     }

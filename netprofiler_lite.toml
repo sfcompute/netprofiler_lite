@@ -23,7 +23,7 @@ backends = [
 
 direction = "download"   # download|upload|both
 concurrency = 256
-duration = 30             # seconds
+duration = 10             # seconds
 prefix = "data-8m"
 file_count = 100
 file_size_mb = 8
