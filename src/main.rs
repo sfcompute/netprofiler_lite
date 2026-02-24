@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
@@ -327,6 +328,17 @@ struct BackendRunResult {
     http_4xx: u64,
     http_429: u64,
     http_5xx: u64,
+    req_samples: u64,
+    req_gbps_mean: f64,
+    req_gbps_p50: f64,
+    req_gbps_p90: f64,
+    req_gbps_min: f64,
+    req_gbps_max: f64,
+    req_ms_mean: f64,
+    req_ms_p50: f64,
+    req_ms_p90: f64,
+    req_ms_min: f64,
+    req_ms_max: f64,
     throughput_gbps: f64,
     grade: String,
 }
@@ -341,6 +353,17 @@ struct RunOutcome {
     http_4xx: u64,
     http_429: u64,
     http_5xx: u64,
+    req_samples: u64,
+    req_gbps_mean: f64,
+    req_gbps_p50: f64,
+    req_gbps_p90: f64,
+    req_gbps_min: f64,
+    req_gbps_max: f64,
+    req_ms_mean: f64,
+    req_ms_p50: f64,
+    req_ms_p90: f64,
+    req_ms_min: f64,
+    req_ms_max: f64,
     throughput_gbps: f64,
     elapsed_secs: f64,
 }
@@ -972,6 +995,9 @@ async fn run_download(
     let http_429 = Arc::new(AtomicU64::new(0));
     let http_5xx = Arc::new(AtomicU64::new(0));
 
+    let req_gbps_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+    let req_ms_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+
     let start = Instant::now();
     let until = start + Duration::from_secs(cfg.duration_secs);
     let mut handles = Vec::with_capacity(cfg.concurrency * 2);
@@ -1024,13 +1050,15 @@ async fn run_download(
         let http_4xx = http_4xx.clone();
         let http_429 = http_429.clone();
         let http_5xx = http_5xx.clone();
+        let req_gbps_samples = req_gbps_samples.clone();
+        let req_ms_samples = req_ms_samples.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
             let i = idx.fetch_add(1, Ordering::Relaxed) % urls.len();
             let url = &urls[i];
             transfers.fetch_add(1, Ordering::Relaxed);
-
+            let req_start = Instant::now();
             let resp = http.get(url).send().await;
             let Ok(resp) = resp else {
                 network_errors.fetch_add(1, Ordering::Relaxed);
@@ -1059,6 +1087,16 @@ async fn run_download(
             }
             bytes.fetch_add(local, Ordering::Relaxed);
             successes.fetch_add(1, Ordering::Relaxed);
+
+            let secs = req_start.elapsed().as_secs_f64().max(0.000_001);
+            let req_gbps = (local as f64 * 8.0) / secs / 1_000_000_000.0;
+            let req_ms = secs * 1000.0;
+            if let Ok(mut v) = req_gbps_samples.lock() {
+                v.push(req_gbps);
+            }
+            if let Ok(mut v) = req_ms_samples.lock() {
+                v.push(req_ms);
+            }
         }));
 
         if handles.len() > cfg.concurrency * 4 {
@@ -1092,6 +1130,16 @@ async fn run_download(
     let total_http_429 = http_429.load(Ordering::Relaxed);
     let total_http_5xx = http_5xx.load(Ordering::Relaxed);
     let gbps = (total_bytes as f64 * 8.0) / elapsed / 1_000_000_000.0;
+
+    let req_gbps = req_gbps_samples
+        .lock()
+        .map(|v| v.clone())
+        .unwrap_or_default();
+    let req_ms = req_ms_samples.lock().map(|v| v.clone()).unwrap_or_default();
+    let (req_samples, req_gbps_mean, req_gbps_p50, req_gbps_p90, req_gbps_min, req_gbps_max) =
+        stats(&req_gbps);
+    let (_, req_ms_mean, req_ms_p50, req_ms_p90, req_ms_min, req_ms_max) = stats(&req_ms);
+
     Ok(RunOutcome {
         bytes: total_bytes,
         transfers: total_transfers,
@@ -1101,6 +1149,17 @@ async fn run_download(
         http_4xx: total_http_4xx,
         http_429: total_http_429,
         http_5xx: total_http_5xx,
+        req_samples,
+        req_gbps_mean,
+        req_gbps_p50,
+        req_gbps_p90,
+        req_gbps_min,
+        req_gbps_max,
+        req_ms_mean,
+        req_ms_p50,
+        req_ms_p90,
+        req_ms_min,
+        req_ms_max,
         throughput_gbps: gbps,
         elapsed_secs: elapsed,
     })
@@ -1117,6 +1176,9 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
     let http_4xx = Arc::new(AtomicU64::new(0));
     let http_429 = Arc::new(AtomicU64::new(0));
     let http_5xx = Arc::new(AtomicU64::new(0));
+
+    let req_gbps_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+    let req_ms_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
     let payload = Bytes::from(vec![0u8; cfg.file_size_mb * 1024 * 1024]);
     let payload_hash = sha256_hex(&payload);
@@ -1148,6 +1210,8 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
         let http_4xx = http_4xx.clone();
         let http_429 = http_429.clone();
         let http_5xx = http_5xx.clone();
+        let req_gbps_samples = req_gbps_samples.clone();
+        let req_ms_samples = req_ms_samples.clone();
         let payload = payload.clone();
         let payload_hash = payload_hash.clone();
         let prefix = prefix.clone();
@@ -1169,6 +1233,7 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
             };
 
             transfers.fetch_add(1, Ordering::Relaxed);
+            let req_start = Instant::now();
             let mut req = http.request(Method::PUT, url).header("authorization", auth);
             for (k, v) in headers {
                 req = req.header(k, v);
@@ -1181,6 +1246,16 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
             if resp.status().is_success() {
                 bytes.fetch_add(bytes_per, Ordering::Relaxed);
                 successes.fetch_add(1, Ordering::Relaxed);
+
+                let secs = req_start.elapsed().as_secs_f64().max(0.000_001);
+                let req_gbps = (bytes_per as f64 * 8.0) / secs / 1_000_000_000.0;
+                let req_ms = secs * 1000.0;
+                if let Ok(mut v) = req_gbps_samples.lock() {
+                    v.push(req_gbps);
+                }
+                if let Ok(mut v) = req_ms_samples.lock() {
+                    v.push(req_ms);
+                }
                 return;
             }
 
@@ -1221,6 +1296,15 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
     let total_http_429 = http_429.load(Ordering::Relaxed);
     let total_http_5xx = http_5xx.load(Ordering::Relaxed);
     let gbps = (total_bytes as f64 * 8.0) / elapsed / 1_000_000_000.0;
+
+    let req_gbps = req_gbps_samples
+        .lock()
+        .map(|v| v.clone())
+        .unwrap_or_default();
+    let req_ms = req_ms_samples.lock().map(|v| v.clone()).unwrap_or_default();
+    let (req_samples, req_gbps_mean, req_gbps_p50, req_gbps_p90, req_gbps_min, req_gbps_max) =
+        stats(&req_gbps);
+    let (_, req_ms_mean, req_ms_p50, req_ms_p90, req_ms_min, req_ms_max) = stats(&req_ms);
     Ok(RunOutcome {
         bytes: total_bytes,
         transfers: total_transfers,
@@ -1230,6 +1314,17 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
         http_4xx: total_http_4xx,
         http_429: total_http_429,
         http_5xx: total_http_5xx,
+        req_samples,
+        req_gbps_mean,
+        req_gbps_p50,
+        req_gbps_p90,
+        req_gbps_min,
+        req_gbps_max,
+        req_ms_mean,
+        req_ms_p50,
+        req_ms_p90,
+        req_ms_min,
+        req_ms_max,
         throughput_gbps: gbps,
         elapsed_secs: elapsed,
     })
@@ -1256,6 +1351,28 @@ fn url_host(url: &str) -> String {
         .or_else(|| u.strip_prefix("http://"))
         .unwrap_or(u);
     u.split('/').next().unwrap_or(u).to_string()
+}
+
+fn endpoint_id(backend_type: BackendType, bucket_or_base: &str) -> String {
+    match backend_type {
+        BackendType::S3 => {
+            let b = bucket_or_base.split('-').last().unwrap_or(bucket_or_base);
+            format!("s3:{}", b)
+        }
+        BackendType::R2 => {
+            let b = bucket_or_base.split('-').last().unwrap_or(bucket_or_base);
+            format!("r2:{}", b)
+        }
+        BackendType::Http => {
+            let host = url_host(bucket_or_base);
+            if host.ends_with(".r2.dev") {
+                let stem = host.trim_end_matches(".r2.dev");
+                format!("r2pub:{}", stem)
+            } else {
+                format!("http:{}", host)
+            }
+        }
+    }
 }
 
 fn fmt_rate(successes: u64, transfers: u64) -> String {
@@ -1291,6 +1408,40 @@ fn p90(values: &mut [f64]) -> f64 {
     values[idx.min(n - 1)]
 }
 
+fn p50(values: &mut [f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = values.len();
+    values[(n - 1) / 2]
+}
+
+fn stats(values: &[f64]) -> (u64, f64, f64, f64, f64, f64) {
+    // Returns: (count, mean, p50, p90, min, max)
+    if values.is_empty() {
+        return (0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    }
+    let mut sum = 0.0;
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    for &v in values {
+        sum += v;
+        if v < min {
+            min = v;
+        }
+        if v > max {
+            max = v;
+        }
+    }
+    let mean = sum / (values.len() as f64);
+    let mut v50 = values.to_vec();
+    let med = p50(&mut v50);
+    let mut v90 = values.to_vec();
+    let p90v = p90(&mut v90);
+    (values.len() as u64, mean, med, p90v, min, max)
+}
+
 fn grade_color(grade: &str) -> &'static str {
     match grade {
         "A+" | "A" => "32", // green
@@ -1319,8 +1470,18 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
     }
 
     println!(
-        "{:<8} {:<24} {:<12} {:>7} {:<3} {:>8} {:>14} {:>6} {}",
-        "dir", "endpoint", "region", "thrpt", "gr", "bytes", "ok/req", "ok%", "errs"
+        "{:<8} {:<24} {:<12} {:>7} {:<3} {:>8} {:>14} {:>6} {:>17} {:>17} {}",
+        "dir",
+        "endpoint",
+        "region",
+        "thrpt",
+        "gr",
+        "bytes",
+        "ok/req",
+        "ok%",
+        "reqGbps m/p50/p90",
+        "reqms m/p50/p90",
+        "errs"
     );
 
     let mut rows = results.results.clone();
@@ -1347,17 +1508,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             r.grade.clone()
         };
 
-        let id = match r.backend_type {
-            BackendType::S3 => {
-                let b = r.bucket.split('-').last().unwrap_or(r.bucket.as_str());
-                format!("s3:{}", b)
-            }
-            BackendType::R2 => {
-                let b = r.bucket.split('-').last().unwrap_or(r.bucket.as_str());
-                format!("r2:{}", b)
-            }
-            BackendType::Http => format!("http:{}", url_host(&r.bucket)),
-        };
+        let id = endpoint_id(r.backend_type, &r.bucket);
         let id = truncate(&id, 24);
         let region = if r.region_or_account.is_empty() {
             "-".to_string()
@@ -1396,8 +1547,17 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             s
         };
 
+        let req_gbps = format!(
+            "{:.2}/{:.2}/{:.2}",
+            r.req_gbps_mean, r.req_gbps_p50, r.req_gbps_p90
+        );
+        let req_ms = format!(
+            "{:.1}/{:.1}/{:.1}",
+            r.req_ms_mean, r.req_ms_p50, r.req_ms_p90
+        );
+
         println!(
-            "{:<8} {:<24} {:<12} {:>7.2} {:<3} {:>7.1}GB {:>7} {:>6} {}",
+            "{:<8} {:<24} {:<12} {:>7.2} {:<3} {:>7.1}GB {:>14} {:>6} {:>17} {:>17} {}",
             match r.direction {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
@@ -1409,6 +1569,8 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             gb,
             format!("{}/{}", ok, tot),
             rate,
+            req_gbps,
+            req_ms,
             errs,
         );
     }
@@ -1492,10 +1654,10 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
 }
 
 fn print_csv(results: &CompareResult) {
-    println!("timestamp,backend_type,name,bucket,region_or_account,direction,concurrency,duration_s,file_count,file_size_mb,bytes,transfers,successes,network_errors,http_non_success,http_4xx,http_429,http_5xx,throughput_gbps,grade");
+    println!("timestamp,backend_type,name,bucket,region_or_account,direction,concurrency,duration_s,file_count,file_size_mb,bytes,transfers,successes,network_errors,http_non_success,http_4xx,http_429,http_5xx,req_samples,req_gbps_mean,req_gbps_p50,req_gbps_p90,req_gbps_min,req_gbps_max,req_ms_mean,req_ms_p50,req_ms_p90,req_ms_min,req_ms_max,throughput_gbps,grade");
     for r in &results.results {
         println!(
-            "{},{:?},{},{},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{:.6},{}",
+            "{},{:?},{},{},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{}",
             r.timestamp.to_rfc3339(),
             r.backend_type,
             r.name,
@@ -1517,6 +1679,17 @@ fn print_csv(results: &CompareResult) {
             r.http_4xx,
             r.http_429,
             r.http_5xx,
+            r.req_samples,
+            r.req_gbps_mean,
+            r.req_gbps_p50,
+            r.req_gbps_p90,
+            r.req_gbps_min,
+            r.req_gbps_max,
+            r.req_ms_mean,
+            r.req_ms_p50,
+            r.req_ms_p90,
+            r.req_ms_min,
+            r.req_ms_max,
             r.throughput_gbps,
             r.grade
         );
@@ -1654,6 +1827,17 @@ async fn main() -> Result<()> {
                 http_4xx: o.http_4xx,
                 http_429: o.http_429,
                 http_5xx: o.http_5xx,
+                req_samples: o.req_samples,
+                req_gbps_mean: o.req_gbps_mean,
+                req_gbps_p50: o.req_gbps_p50,
+                req_gbps_p90: o.req_gbps_p90,
+                req_gbps_min: o.req_gbps_min,
+                req_gbps_max: o.req_gbps_max,
+                req_ms_mean: o.req_ms_mean,
+                req_ms_p50: o.req_ms_p50,
+                req_ms_p90: o.req_ms_p90,
+                req_ms_min: o.req_ms_min,
+                req_ms_max: o.req_ms_max,
                 throughput_gbps: o.throughput_gbps,
                 grade: grade(o.throughput_gbps).to_string(),
             });
@@ -1679,6 +1863,17 @@ async fn main() -> Result<()> {
                 http_4xx: o.http_4xx,
                 http_429: o.http_429,
                 http_5xx: o.http_5xx,
+                req_samples: o.req_samples,
+                req_gbps_mean: o.req_gbps_mean,
+                req_gbps_p50: o.req_gbps_p50,
+                req_gbps_p90: o.req_gbps_p90,
+                req_gbps_min: o.req_gbps_min,
+                req_gbps_max: o.req_gbps_max,
+                req_ms_mean: o.req_ms_mean,
+                req_ms_p50: o.req_ms_p50,
+                req_ms_p90: o.req_ms_p90,
+                req_ms_min: o.req_ms_min,
+                req_ms_max: o.req_ms_max,
                 throughput_gbps: o.throughput_gbps,
                 grade: grade(o.throughput_gbps).to_string(),
             });
