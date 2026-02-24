@@ -328,6 +328,12 @@ struct BackendRunResult {
     http_4xx: u64,
     http_429: u64,
     http_5xx: u64,
+    window_samples: u64,
+    window_gbps_mean: f64,
+    window_gbps_p50: f64,
+    window_gbps_p90: f64,
+    window_gbps_min: f64,
+    window_gbps_max: f64,
     req_samples: u64,
     req_gbps_mean: f64,
     req_gbps_p50: f64,
@@ -353,6 +359,12 @@ struct RunOutcome {
     http_4xx: u64,
     http_429: u64,
     http_5xx: u64,
+    window_samples: u64,
+    window_gbps_mean: f64,
+    window_gbps_p50: f64,
+    window_gbps_p90: f64,
+    window_gbps_min: f64,
+    window_gbps_max: f64,
     req_samples: u64,
     req_gbps_mean: f64,
     req_gbps_p50: f64,
@@ -995,6 +1007,8 @@ async fn run_download(
     let http_429 = Arc::new(AtomicU64::new(0));
     let http_5xx = Arc::new(AtomicU64::new(0));
 
+    let window_gbps_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+
     let req_gbps_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
     let req_ms_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -1003,6 +1017,31 @@ async fn run_download(
     let mut handles = Vec::with_capacity(cfg.concurrency * 2);
 
     let stop = Arc::new(AtomicBool::new(false));
+
+    let sampler_task = {
+        let stop = stop.clone();
+        let bytes = bytes.clone();
+        let window_gbps_samples = window_gbps_samples.clone();
+        let until = until;
+        tokio::spawn(async move {
+            let mut last = bytes.load(Ordering::Relaxed);
+            let mut last_t = Instant::now();
+            let tick = Duration::from_millis(500);
+            while !stop.load(Ordering::Relaxed) && Instant::now() < until {
+                tokio::time::sleep(tick).await;
+                let now_b = bytes.load(Ordering::Relaxed);
+                let now_t = Instant::now();
+                let dt = now_t.duration_since(last_t).as_secs_f64().max(0.000_001);
+                let db = now_b.saturating_sub(last);
+                let gbps = (db as f64 * 8.0) / dt / 1_000_000_000.0;
+                if let Ok(mut v) = window_gbps_samples.lock() {
+                    v.push(gbps);
+                }
+                last = now_b;
+                last_t = now_t;
+            }
+        })
+    };
     let progress_task = if cfg.progress {
         let stop = stop.clone();
         let bytes = bytes.clone();
@@ -1119,6 +1158,7 @@ async fn run_download(
     if let Some(t) = progress_task {
         let _ = t.await;
     }
+    let _ = sampler_task.await;
 
     let elapsed = start.elapsed().as_secs_f64().max(0.001);
     let total_bytes = bytes.load(Ordering::Relaxed);
@@ -1130,6 +1170,19 @@ async fn run_download(
     let total_http_429 = http_429.load(Ordering::Relaxed);
     let total_http_5xx = http_5xx.load(Ordering::Relaxed);
     let gbps = (total_bytes as f64 * 8.0) / elapsed / 1_000_000_000.0;
+
+    let window_gbps = window_gbps_samples
+        .lock()
+        .map(|v| v.clone())
+        .unwrap_or_default();
+    let (
+        window_samples,
+        window_gbps_mean,
+        window_gbps_p50,
+        window_gbps_p90,
+        window_gbps_min,
+        window_gbps_max,
+    ) = stats(&window_gbps);
 
     let req_gbps = req_gbps_samples
         .lock()
@@ -1149,6 +1202,12 @@ async fn run_download(
         http_4xx: total_http_4xx,
         http_429: total_http_429,
         http_5xx: total_http_5xx,
+        window_samples,
+        window_gbps_mean,
+        window_gbps_p50,
+        window_gbps_p90,
+        window_gbps_min,
+        window_gbps_max,
         req_samples,
         req_gbps_mean,
         req_gbps_p50,
@@ -1177,6 +1236,8 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
     let http_429 = Arc::new(AtomicU64::new(0));
     let http_5xx = Arc::new(AtomicU64::new(0));
 
+    let window_gbps_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+
     let req_gbps_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
     let req_ms_samples: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -1189,6 +1250,32 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
     let bytes_per = (cfg.file_size_mb * 1024 * 1024) as u64;
     let prefix = cfg.prefix.clone();
     let b = b.clone();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let sampler_task = {
+        let stop = stop.clone();
+        let bytes = bytes.clone();
+        let window_gbps_samples = window_gbps_samples.clone();
+        let until = until;
+        tokio::spawn(async move {
+            let mut last = bytes.load(Ordering::Relaxed);
+            let mut last_t = Instant::now();
+            let tick = Duration::from_millis(500);
+            while !stop.load(Ordering::Relaxed) && Instant::now() < until {
+                tokio::time::sleep(tick).await;
+                let now_b = bytes.load(Ordering::Relaxed);
+                let now_t = Instant::now();
+                let dt = now_t.duration_since(last_t).as_secs_f64().max(0.000_001);
+                let db = now_b.saturating_sub(last);
+                let gbps = (db as f64 * 8.0) / dt / 1_000_000_000.0;
+                if let Ok(mut v) = window_gbps_samples.lock() {
+                    v.push(gbps);
+                }
+                last = now_b;
+                last_t = now_t;
+            }
+        })
+    };
 
     while Instant::now() < until {
         let permit = match sem.clone().try_acquire_owned() {
@@ -1286,6 +1373,9 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
         }
     }
 
+    stop.store(true, Ordering::Relaxed);
+    let _ = sampler_task.await;
+
     let elapsed = start.elapsed().as_secs_f64().max(0.001);
     let total_bytes = bytes.load(Ordering::Relaxed);
     let total_transfers = transfers.load(Ordering::Relaxed);
@@ -1296,6 +1386,19 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
     let total_http_429 = http_429.load(Ordering::Relaxed);
     let total_http_5xx = http_5xx.load(Ordering::Relaxed);
     let gbps = (total_bytes as f64 * 8.0) / elapsed / 1_000_000_000.0;
+
+    let window_gbps = window_gbps_samples
+        .lock()
+        .map(|v| v.clone())
+        .unwrap_or_default();
+    let (
+        window_samples,
+        window_gbps_mean,
+        window_gbps_p50,
+        window_gbps_p90,
+        window_gbps_min,
+        window_gbps_max,
+    ) = stats(&window_gbps);
 
     let req_gbps = req_gbps_samples
         .lock()
@@ -1314,6 +1417,12 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
         http_4xx: total_http_4xx,
         http_429: total_http_429,
         http_5xx: total_http_5xx,
+        window_samples,
+        window_gbps_mean,
+        window_gbps_p50,
+        window_gbps_p90,
+        window_gbps_min,
+        window_gbps_max,
         req_samples,
         req_gbps_mean,
         req_gbps_p50,
@@ -1370,6 +1479,26 @@ fn endpoint_id(backend_type: BackendType, bucket_or_base: &str) -> String {
                 format!("r2pub:{}", stem)
             } else {
                 format!("http:{}", host)
+            }
+        }
+    }
+}
+
+fn gbps_to_mibs_per_sec(gbps: f64) -> f64 {
+    // MiB/s = (Gbps * 1e9 bits/s) / 8 / (1024*1024)
+    gbps * 1_000_000_000.0 / 8.0 / 1_048_576.0
+}
+
+fn backend_label(backend_type: BackendType, bucket_or_base: &str) -> &'static str {
+    match backend_type {
+        BackendType::S3 => "S3",
+        BackendType::R2 => "R2",
+        BackendType::Http => {
+            let host = url_host(bucket_or_base);
+            if host.ends_with(".r2.dev") {
+                "R2-public"
+            } else {
+                "HTTP"
             }
         }
     }
@@ -1461,28 +1590,16 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         results.config.file_size_mb
     );
 
-    println!(
-        "Columns: thrpt=Gbps (successful bytes only) | bytes=successful bytes | ok/req=successful/attempted requests | ok%=success rate | errs=net(send)+HTTP buckets\n"
-    );
+    println!("Metrics:");
+    println!("- thrpt_gbps: total goodput over the whole test window (successful bytes only)");
+    println!("- win_gbps: 500ms goodput samples across the run (successful bytes only)");
+    println!("- obj_mib_s + req_ms: per-success request stats (one object per request)\n");
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
     }
 
-    println!(
-        "{:<8} {:<24} {:<12} {:>7} {:<3} {:>8} {:>14} {:>6} {:>17} {:>17} {}",
-        "dir",
-        "endpoint",
-        "region",
-        "thrpt",
-        "gr",
-        "bytes",
-        "ok/req",
-        "ok%",
-        "reqGbps m/p50/p90",
-        "reqms m/p50/p90",
-        "errs"
-    );
+    // Per-endpoint blocks are easier to scan than very wide tables.
 
     let mut rows = results.results.clone();
     fn dir_key(d: Direction) -> u8 {
@@ -1510,6 +1627,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
 
         let id = endpoint_id(r.backend_type, &r.bucket);
         let id = truncate(&id, 24);
+        let typ = backend_label(r.backend_type, &r.bucket);
         let region = if r.region_or_account.is_empty() {
             "-".to_string()
         } else {
@@ -1547,32 +1665,65 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             s
         };
 
-        let req_gbps = format!(
-            "{:.2}/{:.2}/{:.2}",
-            r.req_gbps_mean, r.req_gbps_p50, r.req_gbps_p90
-        );
-        let req_ms = format!(
-            "{:.1}/{:.1}/{:.1}",
-            r.req_ms_mean, r.req_ms_p50, r.req_ms_p90
-        );
-
         println!(
-            "{:<8} {:<24} {:<12} {:>7.2} {:<3} {:>7.1}GB {:>14} {:>6} {:>17} {:>17} {}",
+            "{:<8} {:<9} {:<24} region={:<12} thrpt_gbps={:>5.2} {} bytes={:>5.1}GB ok/req={}/{} ({})",
             match r.direction {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
             },
+            typ,
             id,
             region,
             r.throughput_gbps,
             grade,
             gb,
-            format!("{}/{}", ok, tot),
+            ok,
+            tot,
             rate,
-            req_gbps,
-            req_ms,
-            errs,
         );
+
+        let win = if r.window_samples == 0 {
+            "win_gbps=-".to_string()
+        } else {
+            format!(
+                "win_gbps(avg/p50/p90/min/max)={:.2}/{:.2}/{:.2}/{:.2}/{:.2}",
+                r.window_gbps_mean,
+                r.window_gbps_p50,
+                r.window_gbps_p90,
+                r.window_gbps_min,
+                r.window_gbps_max
+            )
+        };
+
+        let obj = if r.req_samples == 0 {
+            "obj_mib_s=- req_ms=-".to_string()
+        } else {
+            let mib_mean = gbps_to_mibs_per_sec(r.req_gbps_mean);
+            let mib_p50 = gbps_to_mibs_per_sec(r.req_gbps_p50);
+            let mib_p90 = gbps_to_mibs_per_sec(r.req_gbps_p90);
+            let mib_min = gbps_to_mibs_per_sec(r.req_gbps_min);
+            let mib_max = gbps_to_mibs_per_sec(r.req_gbps_max);
+            format!(
+                "obj_mib_s(m/p50/p90/min/max)={:.1}/{:.1}/{:.1}/{:.1}/{:.1} req_ms(m/p50/p90/min/max)={:.0}/{:.0}/{:.0}/{:.0}/{:.0} (n={})",
+                mib_mean,
+                mib_p50,
+                mib_p90,
+                mib_min,
+                mib_max,
+                r.req_ms_mean,
+                r.req_ms_p50,
+                r.req_ms_p90,
+                r.req_ms_min,
+                r.req_ms_max,
+                r.req_samples
+            )
+        };
+
+        if errs == "-" {
+            println!("         {} | {}\n", win, obj);
+        } else {
+            println!("         {} | {} | errs: {}\n", win, obj, errs);
+        }
     }
 
     for dir in [Direction::Download, Direction::Upload] {
@@ -1827,6 +1978,12 @@ async fn main() -> Result<()> {
                 http_4xx: o.http_4xx,
                 http_429: o.http_429,
                 http_5xx: o.http_5xx,
+                window_samples: o.window_samples,
+                window_gbps_mean: o.window_gbps_mean,
+                window_gbps_p50: o.window_gbps_p50,
+                window_gbps_p90: o.window_gbps_p90,
+                window_gbps_min: o.window_gbps_min,
+                window_gbps_max: o.window_gbps_max,
                 req_samples: o.req_samples,
                 req_gbps_mean: o.req_gbps_mean,
                 req_gbps_p50: o.req_gbps_p50,
@@ -1863,6 +2020,12 @@ async fn main() -> Result<()> {
                 http_4xx: o.http_4xx,
                 http_429: o.http_429,
                 http_5xx: o.http_5xx,
+                window_samples: o.window_samples,
+                window_gbps_mean: o.window_gbps_mean,
+                window_gbps_p50: o.window_gbps_p50,
+                window_gbps_p90: o.window_gbps_p90,
+                window_gbps_min: o.window_gbps_min,
+                window_gbps_max: o.window_gbps_max,
                 req_samples: o.req_samples,
                 req_gbps_mean: o.req_gbps_mean,
                 req_gbps_p50: o.req_gbps_p50,
