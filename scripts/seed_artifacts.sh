@@ -138,8 +138,10 @@ BUCKET_EUC1="${BUCKET_EUC1:-}"
 BUCKET_USW2="${BUCKET_USW2:-}"
 BUCKET_USE1="${BUCKET_USE1:-}"
 
-# Optional R2
 R2_BUCKET="${R2_BUCKET:-}"
+R2_BUCKET_BASE="${R2_BUCKET_BASE:-${R2_BUCKET}}"
+R2_BUCKET_US="${R2_BUCKET_US:-}"
+R2_BUCKET_EU="${R2_BUCKET_EU:-}"
 R2_ACCOUNT_ID="${R2_ACCOUNT_ID:-}"
 
 # Allow using Doppler Cloudflare secret names directly.
@@ -149,6 +151,11 @@ R2_ACCOUNT_ID="${R2_ACCOUNT_ID:-${CLOUDFLARE_R2_ACCOUNT_ID:-}}"
 R2_ACCESS_KEY_ID="$(sanitize_no_newlines "${R2_ACCESS_KEY_ID:-}")"
 R2_SECRET_ACCESS_KEY="$(sanitize_no_newlines "${R2_SECRET_ACCESS_KEY:-}")"
 R2_ACCOUNT_ID="$(sanitize_no_newlines "${R2_ACCOUNT_ID:-}")"
+
+if [[ -n "$R2_BUCKET_BASE" ]]; then
+  if [[ -z "$R2_BUCKET_US" ]]; then R2_BUCKET_US="${R2_BUCKET_BASE}-us"; fi
+  if [[ -z "$R2_BUCKET_EU" ]]; then R2_BUCKET_EU="${R2_BUCKET_BASE}-eu"; fi
+fi
 
 publish_s3_policy() {
   local bucket="$1"
@@ -394,12 +401,25 @@ publish_s3_policy "$BUCKET_USE1"
 
 echo "S3 done."
 
-if [[ -n "$R2_BUCKET" ]]; then
-  [[ -n "$R2_ACCOUNT_ID" ]] || die "Set R2_ACCOUNT_ID (or CLOUDFLARE_R2_ACCOUNT_ID) when using R2_BUCKET"
-  echo "Seeding R2 bucket..."
-  ensure_r2_bucket "$R2_BUCKET" "$R2_ACCOUNT_ID"
-  seed_objects_r2 "$R2_BUCKET" "$R2_ACCOUNT_ID" "$payload"
-  publish_r2_policy_best_effort "$R2_BUCKET" "$R2_ACCOUNT_ID"
+if [[ -n "$R2_BUCKET_US" || -n "$R2_BUCKET_EU" ]]; then
+  [[ -n "$R2_ACCOUNT_ID" ]] || die "Set R2_ACCOUNT_ID (or CLOUDFLARE_R2_ACCOUNT_ID) when using R2 buckets"
+  : "${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID (or CLOUDFLARE_R2_ACCESS_ID)}"
+  : "${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY (or CLOUDFLARE_R2_SECRET_ACCESS_KEY)}"
+
+  if [[ -n "$R2_BUCKET_US" ]]; then
+    echo "Seeding R2 (US) bucket..."
+    ensure_r2_bucket "$R2_BUCKET_US" "$R2_ACCOUNT_ID"
+    seed_objects_r2 "$R2_BUCKET_US" "$R2_ACCOUNT_ID" "$payload"
+    publish_r2_policy_best_effort "$R2_BUCKET_US" "$R2_ACCOUNT_ID"
+  fi
+
+  if [[ -n "$R2_BUCKET_EU" ]]; then
+    echo "Seeding R2 (EU) bucket..."
+    ensure_r2_bucket "$R2_BUCKET_EU" "$R2_ACCOUNT_ID"
+    seed_objects_r2 "$R2_BUCKET_EU" "$R2_ACCOUNT_ID" "$payload"
+    publish_r2_policy_best_effort "$R2_BUCKET_EU" "$R2_ACCOUNT_ID"
+  fi
+
   echo "R2 done."
 fi
 
@@ -410,6 +430,11 @@ echo "  S3 eu-north-1:   ${BUCKET_EUN1}"
 echo "  S3 eu-central-1: ${BUCKET_EUC1}"
 echo "  S3 us-west-2:    ${BUCKET_USW2}"
 echo "  S3 us-east-1:    ${BUCKET_USE1}"
-if [[ -n "$R2_BUCKET" ]]; then
-  echo "  R2:              ${R2_BUCKET} (account_id=${R2_ACCOUNT_ID})"
+if [[ -n "$R2_BUCKET_US" ]]; then
+  echo "  R2 (US):          ${R2_BUCKET_US} (account_id=${R2_ACCOUNT_ID})"
+  echo "    public URL (r2.dev): https://${R2_BUCKET_US}.${R2_ACCOUNT_ID}.r2.dev/${PREFIX}.0"
+fi
+if [[ -n "$R2_BUCKET_EU" ]]; then
+  echo "  R2 (EU):          ${R2_BUCKET_EU} (account_id=${R2_ACCOUNT_ID})"
+  echo "    public URL (r2.dev): https://${R2_BUCKET_EU}.${R2_ACCOUNT_ID}.r2.dev/${PREFIX}.0"
 fi

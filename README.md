@@ -55,7 +55,11 @@ Run with Nix + Doppler (no secrets written to disk):
 # export BUCKET_USW2=...
 # export BUCKET_USE1=...
 
-export R2_BUCKET=...            # optional
+export R2_BUCKET=...            # optional (single bucket)
+export R2_BUCKET_BASE=sf-netprofiler-lite-r2   # optional; seeds two buckets: -us and -eu
+# or explicitly:
+# export R2_BUCKET_US=sf-netprofiler-lite-r2-us
+# export R2_BUCKET_EU=sf-netprofiler-lite-r2-eu
 export PREFIX=data-8m
 export FILE_COUNT=100
 export FILE_SIZE_MB=8
@@ -102,6 +106,17 @@ R2:
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_ACCOUNT_ID` (if not provided in backend spec)
+
+R2 public access (for partner no-credential download tests):
+- Cloudflare Dashboard -> R2 -> Buckets -> select bucket
+- Enable "Public access" (creates an `r2.dev` URL)
+- Public object URL format used by `netprofiler_lite` when no R2 creds are set:
+  - `https://<bucket>.<account_id>.r2.dev/<key>`
+
+R2 US vs EU:
+- Cloudflare R2 is globally distributed by default.
+- To enforce an EU-only or US-only data boundary, create the bucket with the desired
+  jurisdiction / data localization setting in the Cloudflare UI.
 
 If you don't have credentials:
 - You can still run `--direction download` as long as the objects are public-read.

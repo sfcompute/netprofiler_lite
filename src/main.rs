@@ -424,6 +424,12 @@ fn r2_host(account_id: &str) -> String {
     format!("{}.r2.cloudflarestorage.com", account_id)
 }
 
+fn r2_public_host(bucket: &str, account_id: &str) -> String {
+    // Requires Cloudflare R2 "Public access" enabled for the bucket.
+    // Object URL format: https://<bucket>.<account_id>.r2.dev/<key>
+    format!("{}.{}.r2.dev", bucket, account_id)
+}
+
 fn backend_region_for_signing(b: &Backend) -> &str {
     match b.spec.backend_type {
         BackendType::S3 => b.spec.region_or_account.as_str(),
@@ -434,14 +440,28 @@ fn backend_region_for_signing(b: &Backend) -> &str {
 fn backend_host(b: &Backend) -> String {
     match b.spec.backend_type {
         BackendType::S3 => s3_host(&b.spec.bucket, &b.spec.region_or_account),
-        BackendType::R2 => r2_host(&b.spec.region_or_account),
+        BackendType::R2 => {
+            if b.creds.is_none() {
+                r2_public_host(&b.spec.bucket, &b.spec.region_or_account)
+            } else {
+                r2_host(&b.spec.region_or_account)
+            }
+        }
     }
 }
 
 fn canonical_uri_for_object(b: &Backend, key: &str) -> String {
     match b.spec.backend_type {
         BackendType::S3 => format!("/{}", pct_encode_path(key)),
-        BackendType::R2 => format!("/{}/{}", pct_encode(&b.spec.bucket), pct_encode_path(key)),
+        BackendType::R2 => {
+            if b.creds.is_none() {
+                // public host embeds the bucket name
+                format!("/{}", pct_encode_path(key))
+            } else {
+                // S3-compatible endpoint uses path-style bucket addressing
+                format!("/{}/{}", pct_encode(&b.spec.bucket), pct_encode_path(key))
+            }
+        }
     }
 }
 
