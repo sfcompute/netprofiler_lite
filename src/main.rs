@@ -424,10 +424,10 @@ fn r2_host(account_id: &str) -> String {
     format!("{}.r2.cloudflarestorage.com", account_id)
 }
 
-fn r2_public_host(bucket: &str, account_id: &str) -> String {
+fn r2_public_host(bucket: &str) -> String {
     // Requires Cloudflare R2 "Public access" enabled for the bucket.
-    // Object URL format: https://<bucket>.<account_id>.r2.dev/<key>
-    format!("{}.{}.r2.dev", bucket, account_id)
+    // Public bucket URL format: https://<bucket>.r2.dev/<key>
+    format!("{}.r2.dev", bucket)
 }
 
 fn backend_region_for_signing(b: &Backend) -> &str {
@@ -442,7 +442,7 @@ fn backend_host(b: &Backend) -> String {
         BackendType::S3 => s3_host(&b.spec.bucket, &b.spec.region_or_account),
         BackendType::R2 => {
             if b.creds.is_none() {
-                r2_public_host(&b.spec.bucket, &b.spec.region_or_account)
+                r2_public_host(&b.spec.bucket)
             } else {
                 r2_host(&b.spec.region_or_account)
             }

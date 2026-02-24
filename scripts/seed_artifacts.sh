@@ -152,6 +152,13 @@ R2_ACCESS_KEY_ID="$(sanitize_no_newlines "${R2_ACCESS_KEY_ID:-}")"
 R2_SECRET_ACCESS_KEY="$(sanitize_no_newlines "${R2_SECRET_ACCESS_KEY:-}")"
 R2_ACCOUNT_ID="$(sanitize_no_newlines "${R2_ACCOUNT_ID:-}")"
 
+# If both are present (explicit + Doppler), require they match.
+if [[ -n "${CLOUDFLARE_R2_ACCOUNT_ID:-}" && -n "${R2_ACCOUNT_ID:-}" ]]; then
+  if [[ "$(sanitize_no_newlines "${CLOUDFLARE_R2_ACCOUNT_ID}")" != "${R2_ACCOUNT_ID}" ]]; then
+    die "R2 account id mismatch: R2_ACCOUNT_ID=${R2_ACCOUNT_ID} CLOUDFLARE_R2_ACCOUNT_ID=${CLOUDFLARE_R2_ACCOUNT_ID}"
+  fi
+fi
+
 if [[ -n "$R2_BUCKET_BASE" ]]; then
   if [[ -z "$R2_BUCKET_US" ]]; then R2_BUCKET_US="${R2_BUCKET_BASE}-us"; fi
   if [[ -z "$R2_BUCKET_EU" ]]; then R2_BUCKET_EU="${R2_BUCKET_BASE}-eu"; fi
@@ -432,9 +439,9 @@ echo "  S3 us-west-2:    ${BUCKET_USW2}"
 echo "  S3 us-east-1:    ${BUCKET_USE1}"
 if [[ -n "$R2_BUCKET_US" ]]; then
   echo "  R2 (US):          ${R2_BUCKET_US} (account_id=${R2_ACCOUNT_ID})"
-  echo "    public URL (r2.dev): https://${R2_BUCKET_US}.${R2_ACCOUNT_ID}.r2.dev/${PREFIX}.0"
+  echo "    public URL (r2.dev): https://${R2_BUCKET_US}.r2.dev/${PREFIX}.0"
 fi
 if [[ -n "$R2_BUCKET_EU" ]]; then
   echo "  R2 (EU):          ${R2_BUCKET_EU} (account_id=${R2_ACCOUNT_ID})"
-  echo "    public URL (r2.dev): https://${R2_BUCKET_EU}.${R2_ACCOUNT_ID}.r2.dev/${PREFIX}.0"
+  echo "    public URL (r2.dev): https://${R2_BUCKET_EU}.r2.dev/${PREFIX}.0"
 fi

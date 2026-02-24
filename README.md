@@ -107,11 +107,17 @@ R2:
 - `R2_SECRET_ACCESS_KEY`
 - `R2_ACCOUNT_ID` (if not provided in backend spec)
 
+Note: make sure you're using the intended Cloudflare account id. You can force it when seeding:
+
+```bash
+export R2_ACCOUNT_ID=751a8d4a9f0608f2aa7758b0e8cdd7c1
+```
+
 R2 public access (for partner no-credential download tests):
 - Cloudflare Dashboard -> R2 -> Buckets -> select bucket
 - Enable "Public access" (creates an `r2.dev` URL)
 - Public object URL format used by `netprofiler_lite` when no R2 creds are set:
-  - `https://<bucket>.<account_id>.r2.dev/<key>`
+  - `https://<bucket>.r2.dev/<key>`
 
 R2 US vs EU:
 - Cloudflare R2 is globally distributed by default.
