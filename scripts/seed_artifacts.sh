@@ -23,11 +23,30 @@ load_aws_creds_from_shared_file() {
   # - By default, shared credentials file wins ("look there first").
   # - If you need env vars to override the file, set AWS_ENV_OVERRIDE=1.
 
-  local profile credfile
+  trim() {
+    local s="$1"
+    # leading
+    s="${s#"${s%%[!$' \t\r\n']*}"}"
+    # trailing
+    s="${s%"${s##*[!$' \t\r\n']}"}"
+    printf '%s' "$s"
+  }
+
+  local profile credfile home
   profile="${AWS_PROFILE:-${AWS_DEFAULT_PROFILE:-default}}"
-  credfile="${AWS_SHARED_CREDENTIALS_FILE:-${HOME:-}/.aws/credentials}"
+
+  if [[ -n "${AWS_SHARED_CREDENTIALS_FILE:-}" ]]; then
+    credfile="$AWS_SHARED_CREDENTIALS_FILE"
+  else
+    home="${HOME:-/root}"
+    credfile="${home%/}/.aws/credentials"
+  fi
+
   [[ -n "${credfile}" ]] || return 0
-  [[ -f "${credfile}" ]] || return 0
+  [[ -f "${credfile}" ]] || {
+    echo "WARN: AWS shared credentials not found at $credfile (profile=$profile)" >&2
+    return 0
+  }
 
   # Parse minimal INI: find [profile] section and read keys.
   local in_section=0 line key val
@@ -35,7 +54,7 @@ load_aws_creds_from_shared_file() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"
     line="${line%%;*}"
-    line="$(printf '%s' "$line" | awk '{$1=$1}1')"
+    line="$(trim "$line")"
     [[ -z "$line" ]] && continue
     if [[ "$line" =~ ^\[(.*)\]$ ]]; then
       if [[ "${BASH_REMATCH[1]}" == "$profile" ]]; then
@@ -49,8 +68,9 @@ load_aws_creds_from_shared_file() {
     [[ "$line" == *"="* ]] || continue
     key="${line%%=*}"
     val="${line#*=}"
-    key="$(printf '%s' "$key" | awk '{$1=$1}1' | tr '[:upper:]' '[:lower:]')"
-    val="$(printf '%s' "$val" | awk '{$1=$1}1')"
+    key="$(trim "$key")"
+    val="$(trim "$val")"
+    key="${key,,}"
     # Strip simple quotes
     val="${val%\"}"; val="${val#\"}"
     val="${val%\'}"; val="${val#\'}"
@@ -64,6 +84,7 @@ load_aws_creds_from_shared_file() {
 
   if [[ -n "$ak" && -n "$sk" ]]; then
     if [[ "${AWS_ENV_OVERRIDE:-0}" == "1" && -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+      echo "INFO: Using AWS creds from environment (AWS_ENV_OVERRIDE=1)" >&2
       return 0
     else
       export AWS_ACCESS_KEY_ID="$ak"
@@ -71,7 +92,10 @@ load_aws_creds_from_shared_file() {
       if [[ -n "$st" ]]; then
         export AWS_SESSION_TOKEN="$st"
       fi
+      echo "INFO: Loaded AWS creds from $credfile (profile=$profile)" >&2
     fi
+  else
+    echo "WARN: No static keys found in $credfile (profile=$profile)" >&2
   fi
 }
 
