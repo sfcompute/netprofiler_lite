@@ -1,0 +1,14 @@
+# Rust
+**/target/
+
+# Nix
+result
+result-*
+.direnv/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
