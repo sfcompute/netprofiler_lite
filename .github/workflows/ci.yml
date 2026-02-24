@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v12
+
+      - name: Nix build
+        run: nix build --accept-flake-config
+
+      - name: Cargo test (via dev shell)
+        run: nix develop --accept-flake-config -c cargo test

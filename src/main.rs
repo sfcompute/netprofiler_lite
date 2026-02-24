@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
-use clap::{Parser, Subcommand, ValueEnum};
 use chrono::{DateTime, Utc};
+use clap::{ArgAction, Parser, ValueEnum};
 use futures::StreamExt;
 use hmac::{Hmac, Mac};
 use reqwest::Client as HttpClient;
@@ -9,7 +9,8 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -22,14 +23,16 @@ type HmacSha256 = Hmac<Sha256>;
 #[command(name = "netprofiler_lite")]
 #[command(about = "Shareable object storage throughput benchmark")]
 struct Cli {
-    #[command(subcommand)]
-    cmd: Command,
-}
+    /// Path to config file (TOML). If omitted, reads ./netprofiler_lite.toml when present.
+    #[arg(long)]
+    config: Option<PathBuf>,
 
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Compare multiple object-storage backends
-    Compare(CompareArgs),
+    /// Ignore any config file
+    #[arg(long, default_value_t = false)]
+    no_config: bool,
+
+    #[command(flatten)]
+    compare: CompareArgs,
 }
 
 #[derive(Debug, Parser)]
@@ -38,62 +41,103 @@ struct CompareArgs {
     /// S3: bucket:region
     /// R2: r2:bucket:account_id or r2:bucket (uses R2_ACCOUNT_ID)
     #[arg(long)]
-    backends: String,
+    backends: Option<String>,
 
     /// Ensure bucket access and seed test objects if missing.
     /// Note: R2 buckets cannot be created via S3 API; only objects are seeded.
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     ensure: bool,
 
     /// download, upload, or both
-    #[arg(long, value_enum, default_value_t = DirectionArg::Download)]
-    direction: DirectionArg,
+    #[arg(long, value_enum)]
+    direction: Option<DirectionArg>,
 
     /// Parallel transfers per backend
-    #[arg(long, default_value_t = 256)]
-    concurrency: usize,
+    #[arg(long)]
+    concurrency: Option<usize>,
 
     /// Duration per backend (seconds)
-    #[arg(long, default_value_t = 30)]
-    duration: u64,
+    #[arg(long)]
+    duration: Option<u64>,
 
     /// Object key prefix (keys are {prefix}.0, {prefix}.1, ...)
-    #[arg(long, default_value = "data-8m")]
-    prefix: String,
+    #[arg(long)]
+    prefix: Option<String>,
 
     /// Number of objects to cycle through
-    #[arg(long, default_value_t = 100)]
-    file_count: usize,
+    #[arg(long)]
+    file_count: Option<usize>,
 
     /// Size of each object (MB). Used for seeding and upload payload sizing.
-    #[arg(long, default_value_t = 8)]
-    file_size_mb: usize,
+    #[arg(long)]
+    file_size_mb: Option<usize>,
 
     /// Output format
-    #[arg(long, value_enum, default_value_t = OutputArg::Human)]
-    output: OutputArg,
+    #[arg(long, value_enum)]
+    output: Option<OutputArg>,
 
-    /// Print periodic progress during tests (human output only)
-    #[arg(long, default_value_t = true)]
+    /// Write a TOML report file (default: netprofiler_lite_report.toml)
+    #[arg(long)]
+    report_toml: Option<PathBuf>,
+
+    /// Disable writing the TOML report file
+    #[arg(long, default_value_t = false)]
+    no_report_toml: bool,
+
+    /// Disable ANSI colors in human output
+    #[arg(long, default_value_t = false)]
+    no_color: bool,
+
+    /// Enable periodic progress during tests (human output only)
+    #[arg(long, action = ArgAction::SetTrue)]
     progress: bool,
 
+    /// Disable periodic progress during tests
+    #[arg(long, action = ArgAction::SetTrue)]
+    no_progress: bool,
+
     /// Progress update interval in milliseconds
-    #[arg(long, default_value_t = 1000)]
-    progress_interval_ms: u64,
+    #[arg(long)]
+    progress_interval_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+impl Default for CompareArgs {
+    fn default() -> Self {
+        Self {
+            backends: None,
+            ensure: false,
+            direction: None,
+            concurrency: None,
+            duration: None,
+            prefix: None,
+            file_count: None,
+            file_size_mb: None,
+            output: None,
+            report_toml: None,
+            no_report_toml: false,
+            no_color: false,
+            progress: false,
+            no_progress: false,
+            progress_interval_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum DirectionArg {
     Download,
     Upload,
     Both,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum OutputArg {
     Human,
     Json,
     Csv,
+    Toml,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +185,128 @@ struct RunConfig {
     file_size_mb: usize,
     progress: bool,
     progress_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct FileConfig {
+    backends: Option<Vec<String>>,
+    direction: Option<DirectionArg>,
+    concurrency: Option<usize>,
+    duration: Option<u64>,
+    prefix: Option<String>,
+    file_count: Option<usize>,
+    file_size_mb: Option<usize>,
+    output: Option<OutputArg>,
+    report_toml: Option<PathBuf>,
+    no_report_toml: Option<bool>,
+    no_color: Option<bool>,
+    progress: Option<bool>,
+    progress_interval_ms: Option<u64>,
+}
+
+fn default_config_path() -> PathBuf {
+    PathBuf::from("netprofiler_lite.toml")
+}
+
+fn load_file_config(path: &Path, required: bool) -> Result<Option<FileConfig>> {
+    if !path.exists() {
+        if required {
+            return Err(anyhow!("config file not found: {}", path.display()));
+        }
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("read config file {}", path.display()))?;
+    let cfg: FileConfig =
+        toml::from_str(&raw).with_context(|| format!("parse config file {}", path.display()))?;
+    Ok(Some(cfg))
+}
+
+fn merge_compare(
+    args: CompareArgs,
+    file: Option<FileConfig>,
+) -> Result<(String, CompareArgs, RunConfig)> {
+    let file = file.unwrap_or_default();
+
+    let backends = if let Some(b) = args.backends.clone() {
+        b
+    } else if let Some(list) = file.backends.clone() {
+        list.into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        return Err(anyhow!(
+            "no backends provided. Set 'backends = [..]' in netprofiler_lite.toml or pass --backends"
+        ));
+    };
+
+    let direction = args
+        .direction
+        .or(file.direction)
+        .unwrap_or(DirectionArg::Download);
+    let concurrency = args.concurrency.or(file.concurrency).unwrap_or(256);
+    let duration = args.duration.or(file.duration).unwrap_or(30);
+    let prefix = args
+        .prefix
+        .clone()
+        .or(file.prefix)
+        .unwrap_or_else(|| "data-8m".to_string());
+    let file_count = args.file_count.or(file.file_count).unwrap_or(100);
+    let file_size_mb = args.file_size_mb.or(file.file_size_mb).unwrap_or(8);
+    let output = args.output.or(file.output).unwrap_or(OutputArg::Human);
+    let report_toml = if args.no_report_toml {
+        None
+    } else if let Some(p) = args.report_toml.clone() {
+        Some(p)
+    } else if let Some(p) = file.report_toml.clone() {
+        Some(p)
+    } else {
+        Some(PathBuf::from("netprofiler_lite_report.toml"))
+    };
+    let no_color = args.no_color || file.no_color.unwrap_or(false);
+    let interval_ms = args
+        .progress_interval_ms
+        .or(file.progress_interval_ms)
+        .unwrap_or(1000);
+    let progress = if args.no_progress {
+        false
+    } else if args.progress {
+        true
+    } else {
+        file.progress.unwrap_or(true)
+    };
+
+    let args = CompareArgs {
+        backends: Some(backends.clone()),
+        ensure: args.ensure,
+        direction: Some(direction),
+        concurrency: Some(concurrency),
+        duration: Some(duration),
+        prefix: Some(prefix.clone()),
+        file_count: Some(file_count),
+        file_size_mb: Some(file_size_mb),
+        output: Some(output),
+        report_toml,
+        no_report_toml: args.no_report_toml || file.no_report_toml.unwrap_or(false),
+        no_color,
+        progress: progress,
+        no_progress: false,
+        progress_interval_ms: Some(interval_ms),
+    };
+
+    let cfg = RunConfig {
+        concurrency,
+        duration_secs: duration,
+        prefix,
+        file_count,
+        file_size_mb,
+        progress: progress && matches!(output, OutputArg::Human),
+        progress_interval_ms: interval_ms,
+    };
+
+    Ok((backends, args, cfg))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,13 +407,14 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
 }
 
 fn grade(gbps: f64) -> &'static str {
-    if gbps >= 10.0 {
+    // Match ~/sf_compute/metal-agent thresholds.
+    if gbps >= 40.0 {
         "A+"
-    } else if gbps >= 5.0 {
+    } else if gbps >= 20.0 {
         "A"
-    } else if gbps >= 2.0 {
+    } else if gbps >= 10.0 {
         "B"
-    } else if gbps >= 1.0 {
+    } else if gbps >= 5.0 {
         "C"
     } else {
         "D"
@@ -365,7 +532,16 @@ fn r2_creds_from_env() -> Option<Credentials> {
 fn make_backend(spec: BackendSpec) -> Result<Backend> {
     let creds = match spec.backend_type {
         BackendType::S3 => s3_creds(),
-        BackendType::R2 => r2_creds_from_env(),
+        BackendType::R2 => {
+            let c = r2_creds_from_env();
+            if c.is_none() {
+                return Err(anyhow!(
+                    "R2 backend '{}' requires credentials (R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY). For no-credential partner runs, use the bucket public origin as an https://... backend (e.g. https://pub-<id>.r2.dev).",
+                    spec.name
+                ));
+            }
+            c
+        }
         BackendType::Http => None,
     };
     Ok(Backend { spec, creds })
@@ -455,12 +631,6 @@ fn r2_host(account_id: &str) -> String {
     format!("{}.r2.cloudflarestorage.com", account_id)
 }
 
-fn r2_public_host(bucket: &str) -> String {
-    // Requires Cloudflare R2 "Public access" enabled for the bucket.
-    // Public bucket URL format: https://<bucket>.r2.dev/<key>
-    format!("{}.r2.dev", bucket)
-}
-
 fn backend_region_for_signing(b: &Backend) -> &str {
     match b.spec.backend_type {
         BackendType::S3 => b.spec.region_or_account.as_str(),
@@ -472,13 +642,7 @@ fn backend_region_for_signing(b: &Backend) -> &str {
 fn backend_host(b: &Backend) -> String {
     match b.spec.backend_type {
         BackendType::S3 => s3_host(&b.spec.bucket, &b.spec.region_or_account),
-        BackendType::R2 => {
-            if b.creds.is_none() {
-                r2_public_host(&b.spec.bucket)
-            } else {
-                r2_host(&b.spec.region_or_account)
-            }
-        }
+        BackendType::R2 => r2_host(&b.spec.region_or_account),
         BackendType::Http => "".to_string(),
     }
 }
@@ -486,15 +650,8 @@ fn backend_host(b: &Backend) -> String {
 fn canonical_uri_for_object(b: &Backend, key: &str) -> String {
     match b.spec.backend_type {
         BackendType::S3 => format!("/{}", pct_encode_path(key)),
-        BackendType::R2 => {
-            if b.creds.is_none() {
-                // public host embeds the bucket name
-                format!("/{}", pct_encode_path(key))
-            } else {
-                // S3-compatible endpoint uses path-style bucket addressing
-                format!("/{}/{}", pct_encode(&b.spec.bucket), pct_encode_path(key))
-            }
-        }
+        // S3-compatible endpoint uses path-style bucket addressing
+        BackendType::R2 => format!("/{}/{}", pct_encode(&b.spec.bucket), pct_encode_path(key)),
         BackendType::Http => format!("/{}", pct_encode_path(key)),
     }
 }
@@ -508,12 +665,12 @@ fn object_url(b: &Backend, key: &str, query: Option<&str>) -> String {
             _ => format!("{}/{}", base, path),
         }
     } else {
-    let host = backend_host(b);
-    let uri = canonical_uri_for_object(b, key);
-    match query {
-        Some(q) if !q.is_empty() => format!("https://{}{}?{}", host, uri, q),
-        _ => format!("https://{}{}", host, uri),
-    }
+        let host = backend_host(b);
+        let uri = canonical_uri_for_object(b, key);
+        match query {
+            Some(q) if !q.is_empty() => format!("https://{}{}?{}", host, uri, q),
+            _ => format!("https://{}{}", host, uri),
+        }
     }
 }
 
@@ -589,10 +746,7 @@ fn sign_headers(
     let (amz_date, date_stamp) = amz_dates(now);
     headers.insert("host".to_string(), backend_host(b));
     headers.insert("x-amz-date".to_string(), amz_date.clone());
-    headers.insert(
-        "x-amz-content-sha256".to_string(),
-        payload_hash.to_string(),
-    );
+    headers.insert("x-amz-content-sha256".to_string(), payload_hash.to_string());
     if let Some(ref token) = creds.session_token {
         headers.insert("x-amz-security-token".to_string(), token.clone());
     }
@@ -698,7 +852,9 @@ async fn head_object(http: &HttpClient, b: &Backend, key: &str) -> Result<reqwes
     let mut headers = BTreeMap::new();
     let empty_hash = sha256_hex(b"");
     let auth = sign_headers(b, "HEAD", &uri, "", &mut headers, &empty_hash, now)?;
-    let mut req = http.request(Method::HEAD, url).header("authorization", auth);
+    let mut req = http
+        .request(Method::HEAD, url)
+        .header("authorization", auth);
     for (k, v) in headers {
         req = req.header(k, v);
     }
@@ -847,7 +1003,9 @@ async fn run_download(
             transfers.fetch_add(1, Ordering::Relaxed);
 
             let resp = http.get(url).send().await;
-            let Ok(resp) = resp else { return; };
+            let Ok(resp) = resp else {
+                return;
+            };
             if !resp.status().is_success() {
                 return;
             }
@@ -855,7 +1013,9 @@ async fn run_download(
             let mut stream = resp.bytes_stream();
             let mut local: u64 = 0;
             while let Some(item) = stream.next().await {
-                let Ok(chunk) = item else { return; };
+                let Ok(chunk) = item else {
+                    return;
+                };
                 local += chunk.len() as u64;
             }
             bytes.fetch_add(local, Ordering::Relaxed);
@@ -891,7 +1051,11 @@ async fn run_download(
     Ok((total_bytes, total_transfers, total_success, gbps, elapsed))
 }
 
-async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<(u64, u64, u64, f64, f64)> {
+async fn run_upload(
+    http: &HttpClient,
+    b: &Backend,
+    cfg: &RunConfig,
+) -> Result<(u64, u64, u64, f64, f64)> {
     let sem = Arc::new(Semaphore::new(cfg.concurrency));
     let idx = Arc::new(AtomicUsize::new(0));
     let bytes = Arc::new(AtomicU64::new(0));
@@ -938,8 +1102,7 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<(
             let now = Utc::now();
             let mut headers = BTreeMap::new();
             headers.insert("content-length".to_string(), payload.len().to_string());
-            let auth = match sign_headers(&b, "PUT", &uri, "", &mut headers, &payload_hash, now)
-            {
+            let auth = match sign_headers(&b, "PUT", &uri, "", &mut headers, &payload_hash, now) {
                 Ok(a) => a,
                 Err(_) => return,
             };
@@ -950,7 +1113,9 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<(
                 req = req.header(k, v);
             }
             let resp = req.body(payload).send().await;
-            let Ok(resp) = resp else { return; };
+            let Ok(resp) = resp else {
+                return;
+            };
             if resp.status().is_success() {
                 bytes.fetch_add(bytes_per, Ordering::Relaxed);
                 successes.fetch_add(1, Ordering::Relaxed);
@@ -981,7 +1146,20 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<(
     Ok((total_bytes, total_transfers, total_success, gbps, elapsed))
 }
 
-fn print_human(results: &CompareResult) {
+fn ansi(color: &str, s: &str) -> String {
+    format!("\x1b[{}m{}\x1b[0m", color, s)
+}
+
+fn grade_color(grade: &str) -> &'static str {
+    match grade {
+        "A+" | "A" => "32", // green
+        "B" => "33",        // yellow
+        "C" | "D" => "31",  // red
+        _ => "0",
+    }
+}
+
+fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Path>) {
     println!(
         "Config: concurrency={} duration={}s prefix={} file_count={} file_size_mb={}\n",
         results.config.concurrency,
@@ -990,6 +1168,10 @@ fn print_human(results: &CompareResult) {
         results.config.file_count,
         results.config.file_size_mb
     );
+
+    if let Some(p) = report_path {
+        println!("Report: {}\n", p.display());
+    }
 
     let mut rows = results.results.clone();
     fn dir_key(d: Direction) -> u8 {
@@ -1009,6 +1191,11 @@ fn print_human(results: &CompareResult) {
     });
 
     for r in &rows {
+        let grade = if !no_color && std::io::stdout().is_terminal() {
+            ansi(grade_color(&r.grade), &r.grade)
+        } else {
+            r.grade.clone()
+        };
         println!(
             "{:<8} {:<26} {:<3} {:>8.3} Gbps  ok={}/{} bytes={}  ({}/{})",
             match r.direction {
@@ -1016,7 +1203,7 @@ fn print_human(results: &CompareResult) {
                 Direction::Upload => "upload",
             },
             r.name,
-            r.grade,
+            grade,
             r.throughput_gbps,
             r.successes,
             r.transfers,
@@ -1079,158 +1266,181 @@ fn print_csv(results: &CompareResult) {
     }
 }
 
+fn print_toml(results: &CompareResult) -> Result<()> {
+    println!("{}", toml::to_string_pretty(results)?);
+    Ok(())
+}
+
+fn write_toml_report(results: &CompareResult, path: &Path) -> Result<()> {
+    let s = toml::to_string_pretty(results).context("serialize toml report")?;
+    std::fs::write(path, s).with_context(|| format!("write report {}", path.display()))?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.cmd {
-        Command::Compare(args) => {
-            if args.concurrency == 0 {
-                return Err(anyhow!("--concurrency must be >= 1"));
-            }
-            if args.duration == 0 {
-                return Err(anyhow!("--duration must be >= 1"));
-            }
-            if args.file_count == 0 {
-                return Err(anyhow!("--file-count must be >= 1"));
-            }
-            if args.file_count > 10_000 {
-                return Err(anyhow!("--file-count too large (use <= 10000)"));
-            }
+    let file_cfg = if cli.no_config {
+        None
+    } else {
+        let path = cli.config.clone().unwrap_or_else(default_config_path);
+        let required = cli.config.is_some();
+        load_file_config(&path, required)?
+    };
 
-            let specs = parse_backends(&args.backends)?;
-            let cfg = RunConfig {
-                concurrency: args.concurrency,
-                duration_secs: args.duration,
-                prefix: args.prefix,
-                file_count: args.file_count,
-                file_size_mb: args.file_size_mb,
-                progress: args.progress && matches!(args.output, OutputArg::Human),
-                progress_interval_ms: args.progress_interval_ms,
-            };
+    let (backends_str, args, cfg) = merge_compare(cli.compare, file_cfg)?;
+    if cfg.concurrency == 0 {
+        return Err(anyhow!("concurrency must be >= 1"));
+    }
+    if cfg.duration_secs == 0 {
+        return Err(anyhow!("duration must be >= 1"));
+    }
+    if cfg.file_count == 0 {
+        return Err(anyhow!("file_count must be >= 1"));
+    }
+    if cfg.file_count > 10_000 {
+        return Err(anyhow!("file_count too large (use <= 10000)"));
+    }
 
-            let http = HttpClient::builder()
-                .http1_only()
-                .pool_idle_timeout(Duration::from_secs(90))
-                .pool_max_idle_per_host(4096)
-                .tcp_nodelay(true)
-                .build()
-                .context("build http client")?;
+    let specs = parse_backends(&backends_str)?;
+    let direction = args.direction.unwrap_or(DirectionArg::Download);
+    let output = args.output.unwrap_or(OutputArg::Human);
 
-            let mut backends = Vec::with_capacity(specs.len());
-            for s in specs {
-                backends.push(make_backend(s)?);
+    let http = HttpClient::builder()
+        .http1_only()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(4096)
+        .tcp_nodelay(true)
+        .build()
+        .context("build http client")?;
+
+    let mut backends = Vec::with_capacity(specs.len());
+    for s in specs {
+        backends.push(make_backend(s)?);
+    }
+
+    if matches!(direction, DirectionArg::Upload | DirectionArg::Both) {
+        for b in &backends {
+            if b.creds.is_none() {
+                return Err(anyhow!(
+                    "upload requires credentials for {}. Set AWS_* for S3 and/or R2_* for R2, or run with --direction download",
+                    b.spec.name
+                ));
             }
+        }
+    }
 
-            if matches!(args.direction, DirectionArg::Upload | DirectionArg::Both) {
-                for b in &backends {
-                    if b.creds.is_none() {
-                        return Err(anyhow!(
-                            "upload requires credentials for {}. Set AWS_* for S3 and/or R2_* for R2, or run with --direction download",
-                            b.spec.name
-                        ));
-                    }
+    if args.ensure {
+        for b in &backends {
+            ensure_bucket_and_objects(&http, b, &cfg).await?;
+        }
+    }
+
+    let mut all_results = Vec::new();
+    for b in &backends {
+        if matches!(direction, DirectionArg::Download | DirectionArg::Both) {
+            let mut urls = Vec::with_capacity(cfg.file_count);
+            if b.creds.is_some() {
+                let expires = cfg.duration_secs + 900;
+                let now = Utc::now();
+                for i in 0..cfg.file_count {
+                    let key = format!("{}.{}", cfg.prefix, i);
+                    urls.push(presign_get_url(b, &key, expires, now)?);
+                }
+            } else {
+                eprintln!(
+                    "[{}] No credentials found; using anonymous public URLs. Objects must be public-read.",
+                    b.spec.name
+                );
+                for i in 0..cfg.file_count {
+                    let key = format!("{}.{}", cfg.prefix, i);
+                    urls.push(object_url(b, &key, None));
                 }
             }
 
-            if args.ensure {
-                for b in &backends {
-                    ensure_bucket_and_objects(&http, b, &cfg).await?;
+            if let Some(u) = urls.first() {
+                let resp = http.get(u).send().await;
+                let resp = resp.with_context(|| {
+                    format!(
+                        "preflight GET request failed for {} (url={})",
+                        b.spec.name, u
+                    )
+                })?;
+                let status = resp.status();
+                if !status.is_success() {
+                    return Err(anyhow!(
+                        "preflight GET failed for {} (HTTP {}): expected objects like {}.0",
+                        b.spec.name,
+                        status,
+                        cfg.prefix
+                    ));
                 }
             }
 
-            let mut all_results = Vec::new();
-            for b in &backends {
-                if matches!(args.direction, DirectionArg::Download | DirectionArg::Both) {
-                    let mut urls = Vec::with_capacity(cfg.file_count);
-                    if b.creds.is_some() {
-                        let expires = cfg.duration_secs + 900;
-                        let now = Utc::now();
-                        for i in 0..cfg.file_count {
-                            let key = format!("{}.{}", cfg.prefix, i);
-                            urls.push(presign_get_url(b, &key, expires, now)?);
-                        }
-                    } else {
-                        eprintln!(
-                            "[{}] No credentials found; using anonymous public URLs. Objects must be public-read.",
-                            b.spec.name
-                        );
-                        for i in 0..cfg.file_count {
-                            let key = format!("{}.{}", cfg.prefix, i);
-                            urls.push(object_url(b, &key, None));
-                        }
-                    }
-                    if let Some(u) = urls.first() {
-                        let resp = http.get(u).send().await;
-                        let resp = resp.with_context(|| {
-                            format!(
-                                "preflight GET request failed for {} (url={})",
-                                b.spec.name, u
-                            )
-                        })?;
-                        let status = resp.status();
-                        if !status.is_success() {
-                            return Err(anyhow!(
-                                "preflight GET failed for {} (HTTP {}): expected objects like {}.0",
-                                b.spec.name,
-                                status,
-                                cfg.prefix
-                            ));
-                        }
-                    }
-                    let started = Utc::now();
-                    let (bytes, transfers, successes, gbps, elapsed) =
-                        run_download(&http, Arc::new(urls), &cfg, &format!("{}", b.spec.name)).await?;
-                    all_results.push(BackendRunResult {
-                        timestamp: started,
-                        backend_type: b.spec.backend_type,
-                        name: b.spec.name.clone(),
-                        bucket: b.spec.bucket.clone(),
-                        region_or_account: b.spec.region_or_account.clone(),
-                        direction: Direction::Download,
-                        concurrency: cfg.concurrency,
-                        duration_secs: elapsed,
-                        bytes,
-                        transfers,
-                        successes,
-                        throughput_gbps: gbps,
-                        grade: grade(gbps).to_string(),
-                    });
-                }
+            let started = Utc::now();
+            let (bytes, transfers, successes, gbps, elapsed) =
+                run_download(&http, Arc::new(urls), &cfg, &format!("{}", b.spec.name)).await?;
+            all_results.push(BackendRunResult {
+                timestamp: started,
+                backend_type: b.spec.backend_type,
+                name: b.spec.name.clone(),
+                bucket: b.spec.bucket.clone(),
+                region_or_account: b.spec.region_or_account.clone(),
+                direction: Direction::Download,
+                concurrency: cfg.concurrency,
+                duration_secs: elapsed,
+                bytes,
+                transfers,
+                successes,
+                throughput_gbps: gbps,
+                grade: grade(gbps).to_string(),
+            });
+        }
 
-                if matches!(args.direction, DirectionArg::Upload | DirectionArg::Both) {
-                    let started = Utc::now();
-                    let (bytes, transfers, successes, gbps, elapsed) =
-                        run_upload(&http, b, &cfg).await?;
-                    all_results.push(BackendRunResult {
-                        timestamp: started,
-                        backend_type: b.spec.backend_type,
-                        name: b.spec.name.clone(),
-                        bucket: b.spec.bucket.clone(),
-                        region_or_account: b.spec.region_or_account.clone(),
-                        direction: Direction::Upload,
-                        concurrency: cfg.concurrency,
-                        duration_secs: elapsed,
-                        bytes,
-                        transfers,
-                        successes,
-                        throughput_gbps: gbps,
-                        grade: grade(gbps).to_string(),
-                    });
-                }
-            }
+        if matches!(direction, DirectionArg::Upload | DirectionArg::Both) {
+            let started = Utc::now();
+            let (bytes, transfers, successes, gbps, elapsed) = run_upload(&http, b, &cfg).await?;
+            all_results.push(BackendRunResult {
+                timestamp: started,
+                backend_type: b.spec.backend_type,
+                name: b.spec.name.clone(),
+                bucket: b.spec.bucket.clone(),
+                region_or_account: b.spec.region_or_account.clone(),
+                direction: Direction::Upload,
+                concurrency: cfg.concurrency,
+                duration_secs: elapsed,
+                bytes,
+                transfers,
+                successes,
+                throughput_gbps: gbps,
+                grade: grade(gbps).to_string(),
+            });
+        }
+    }
 
-            let result = CompareResult {
-                timestamp: Utc::now(),
-                config: cfg,
-                results: all_results,
-            };
+    let result = CompareResult {
+        timestamp: Utc::now(),
+        config: cfg,
+        results: all_results,
+    };
 
-            match args.output {
-                OutputArg::Human => print_human(&result),
-                OutputArg::Json => println!("{}", serde_json::to_string_pretty(&result)?),
-                OutputArg::Csv => print_csv(&result),
-            }
+    // Write report file (TOML) unless disabled
+    if let Some(ref p) = args.report_toml {
+        if !args.no_report_toml {
+            write_toml_report(&result, p)?;
+        }
+    }
+
+    match output {
+        OutputArg::Human => {
+            let report_path = args.report_toml.as_deref().filter(|_| !args.no_report_toml);
+            print_human(&result, args.no_color, report_path);
+        }
+        OutputArg::Json => println!("{}", serde_json::to_string_pretty(&result)?),
+        OutputArg::Csv => print_csv(&result),
+        OutputArg::Toml => {
+            print_toml(&result)?;
         }
     }
 

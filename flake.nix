@@ -25,11 +25,13 @@
           cargo = toolchain.cargo;
           rustc = toolchain.rustc;
         };
+        cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+        pkgVersion = cargoToml.package.version;
       in
       {
         packages.default = rustPlatform.buildRustPackage {
           pname = "netprofiler_lite";
-          version = "0.1.0";
+          version = pkgVersion;
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
           doCheck = false;

@@ -1,0 +1,41 @@
+# netprofiler_lite.toml
+#
+# This file is read automatically (if present) and provides defaults.
+# CLI args override values set here.
+
+# Backends are evaluated in order.
+# Supported entries:
+# - S3: "bucket:region"
+# - R2 (authenticated): "r2:bucket:account_id" (requires R2_* env vars)
+# - Public HTTP origin: "https://..." (CloudFront, public R2, etc.)
+
+backends = [
+  # S3 buckets (public-read objects required for no-credential runs)
+  "sf-netprofiler-lite-903616605317-eun1:eu-north-1",
+  "sf-netprofiler-lite-903616605317-euc1:eu-central-1",
+  "sf-netprofiler-lite-903616605317-usw2:us-west-2",
+  "sf-netprofiler-lite-903616605317-use1:us-east-1",
+
+  # Public R2 origins (example; replace with your public endpoints)
+  # "https://pub-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.r2.dev",
+  # "https://pub-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.r2.dev",
+]
+
+direction = "download"   # download|upload|both
+concurrency = 256
+duration = 30             # seconds
+prefix = "data-8m"
+file_count = 100
+file_size_mb = 8
+
+output = "human"         # human|json|csv|toml
+
+# Write a TOML report file (in addition to stdout output). Set to false to disable.
+report_toml = "netprofiler_lite_report.toml"
+# no_report_toml = true
+
+# Set true to disable ANSI colors in human output.
+no_color = false
+
+progress = true
+progress_interval_ms = 1000

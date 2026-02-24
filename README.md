@@ -118,8 +118,11 @@ export R2_ACCOUNT_ID=751a8d4a9f0608f2aa7758b0e8cdd7c1
 R2 public access (for partner no-credential download tests):
 - Cloudflare Dashboard -> R2 -> Buckets -> select bucket
 - Enable "Public access" (creates an `r2.dev` URL)
-- Public object URL format used by `netprofiler_lite` when no R2 creds are set:
-  - `https://<bucket>.r2.dev/<key>`
+- For partner runs (no credentials), prefer using the public origin backend:
+  - Add the bucket's public origin to `backends` as `https://pub-<id>.r2.dev`
+  - `netprofiler_lite` will request `https://pub-<id>.r2.dev/<key>`
+
+Note: `r2:bucket:account_id` backends are for authenticated access (R2_* env vars).
 
 R2 US vs EU:
 - Cloudflare R2 is globally distributed by default.
@@ -139,20 +142,21 @@ nix develop --accept-flake-config -c aws configure
 ## Typical run (download)
 
 ```bash
-./target/release/netprofiler_lite compare \
-  --backends "bkt-eun1:eu-north-1,bkt-usw2:us-west-2,bkt-use1:us-east-1,bkt-euc1:eu-central-1" \
-  --direction download \
-  --concurrency 256 \
-  --duration 30 \
-  --prefix data-8m \
-  --file-count 100 \
-  --file-size-mb 8
+./target/release/netprofiler_lite
+```
+
+This reads `netprofiler_lite.toml` automatically (if present). CLI args override config.
+
+Override just one thing (example):
+
+```bash
+./target/release/netprofiler_lite --duration 60
 ```
 
 If objects are missing, you can seed them:
 
 ```bash
-./target/release/netprofiler_lite compare \
+./target/release/netprofiler_lite \
   --backends "bkt-eun1:eu-north-1,bkt-usw2:us-west-2" \
   --ensure
 ```
@@ -161,3 +165,8 @@ Output formats:
 - `--output human` (default)
 - `--output json`
 - `--output csv`
+- `--output toml`
+
+Report file:
+- By default, a TOML report is written to `netprofiler_lite_report.toml`.
+- Override with `--report-toml path/to/report.toml` or disable with `--no-report-toml`.
