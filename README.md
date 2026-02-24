@@ -64,6 +64,11 @@ nix develop --accept-flake-config -c doppler run --project cloudflare --config p
   bash ./scripts/seed_artifacts.sh
 ```
 
+Seeding speed knobs:
+- `SEED_CONCURRENCY=16` (default): parallel uploads per bucket/region
+- `SEED_MODE=overwrite` (default): always upload objects (fastest)
+- `SEED_MODE=skip-existing`: HEAD objects first and only upload missing
+
 Or as a flake app:
 
 ```bash

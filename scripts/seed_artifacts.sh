@@ -12,6 +12,14 @@ need() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; 
 need aws
 need dd
 
+# Speed knobs
+# - SEED_CONCURRENCY: parallelism per bucket/region
+# - SEED_MODE:
+#     overwrite     -> always upload objects (fastest; safe for one-off preseeding)
+#     skip-existing -> HEAD each object and only upload if missing
+SEED_CONCURRENCY="${SEED_CONCURRENCY:-16}"
+SEED_MODE="${SEED_MODE:-overwrite}"
+
 load_aws_creds_from_shared_file() {
   # If AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY aren't set, try to source them
   # from AWS_SHARED_CREDENTIALS_FILE or ~/.aws/credentials.
@@ -186,14 +194,24 @@ ensure_s3_bucket() {
 
 seed_objects_s3() {
   local bucket="$1" region="$2" payload_path="$3"
-  local i key
-  for ((i=0; i<FILE_COUNT; i++)); do
+
+  export PREFIX FILE_COUNT
+  case "$SEED_MODE" in
+    overwrite|skip-existing) ;;
+    *) die "Invalid SEED_MODE: $SEED_MODE (use overwrite or skip-existing)";;
+  esac
+
+  seq 0 $((FILE_COUNT-1)) | xargs -n 1 -P "$SEED_CONCURRENCY" -I {} bash -c '
+    set -euo pipefail
+    i="{}"
     key="${PREFIX}.${i}"
-    if aws s3api head-object --bucket "$bucket" --key "$key" --region "$region" >/dev/null 2>&1; then
-      continue
+    if [[ "'$SEED_MODE'" == "skip-existing" ]]; then
+      if aws s3api head-object --bucket "'$bucket'" --key "$key" --region "'$region'" >/dev/null 2>&1; then
+        exit 0
+      fi
     fi
-    aws s3api put-object --bucket "$bucket" --key "$key" --body "$payload_path" --region "$region" >/dev/null
-  done
+    aws s3api put-object --bucket "'$bucket'" --key "$key" --body "'$payload_path'" --region "'$region'" >/dev/null
+  '
 }
 
 ensure_r2_bucket() {
@@ -216,20 +234,30 @@ ensure_r2_bucket() {
 seed_objects_r2() {
   local bucket="$1" account_id="$2" payload_path="$3"
   local endpoint="https://${account_id}.r2.cloudflarestorage.com"
-  local i key
-  for ((i=0; i<FILE_COUNT; i++)); do
+
+  export PREFIX FILE_COUNT
+  case "$SEED_MODE" in
+    overwrite|skip-existing) ;;
+    *) die "Invalid SEED_MODE: $SEED_MODE (use overwrite or skip-existing)";;
+  esac
+
+  seq 0 $((FILE_COUNT-1)) | xargs -n 1 -P "$SEED_CONCURRENCY" -I {} bash -c '
+    set -euo pipefail
+    i="{}"
     key="${PREFIX}.${i}"
-    if AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?}" \
-       AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?}" \
-       AWS_REGION="auto" \
-       aws --endpoint-url "$endpoint" s3api head-object --bucket "$bucket" --key "$key" >/dev/null 2>&1; then
-      continue
+    if [[ "'$SEED_MODE'" == "skip-existing" ]]; then
+      if AWS_ACCESS_KEY_ID="'${R2_ACCESS_KEY_ID:-}'" \
+         AWS_SECRET_ACCESS_KEY="'${R2_SECRET_ACCESS_KEY:-}'" \
+         AWS_REGION="auto" \
+         aws --endpoint-url "'$endpoint'" s3api head-object --bucket "'$bucket'" --key "$key" >/dev/null 2>&1; then
+        exit 0
+      fi
     fi
-    AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?}" \
-    AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?}" \
+    AWS_ACCESS_KEY_ID="'${R2_ACCESS_KEY_ID:-}'" \
+    AWS_SECRET_ACCESS_KEY="'${R2_SECRET_ACCESS_KEY:-}'" \
     AWS_REGION="auto" \
-    aws --endpoint-url "$endpoint" s3api put-object --bucket "$bucket" --key "$key" --body "$payload_path" >/dev/null
-  done
+    aws --endpoint-url "'$endpoint'" s3api put-object --bucket "'$bucket'" --key "$key" --body "'$payload_path'" >/dev/null
+  '
 }
 
 publish_r2_policy_best_effort() {
