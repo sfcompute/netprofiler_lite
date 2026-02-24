@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -71,6 +72,14 @@ struct CompareArgs {
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputArg::Human)]
     output: OutputArg,
+
+    /// Print periodic progress during tests (human output only)
+    #[arg(long, default_value_t = true)]
+    progress: bool,
+
+    /// Progress update interval in milliseconds
+    #[arg(long, default_value_t = 1000)]
+    progress_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -99,6 +108,7 @@ enum Direction {
 enum BackendType {
     S3,
     R2,
+    Http,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +139,8 @@ struct RunConfig {
     prefix: String,
     file_count: usize,
     file_size_mb: usize,
+    progress: bool,
+    progress_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,6 +170,24 @@ struct CompareResult {
 fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
     let mut out = Vec::new();
     for raw in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if raw.starts_with("https://") || raw.starts_with("http://") {
+            // Generic public HTTP origin; keys appended as /<key>
+            let base = raw.trim_end_matches('/').to_string();
+            let host = base
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or("http");
+            out.push(BackendSpec {
+                backend_type: BackendType::Http,
+                name: format!("http-{}", host),
+                bucket: base,
+                region_or_account: "".to_string(),
+            });
+            continue;
+        }
+
         let parts: Vec<&str> = raw.split(':').collect();
         if parts.is_empty() {
             continue;
@@ -336,6 +366,7 @@ fn make_backend(spec: BackendSpec) -> Result<Backend> {
     let creds = match spec.backend_type {
         BackendType::S3 => s3_creds(),
         BackendType::R2 => r2_creds_from_env(),
+        BackendType::Http => None,
     };
     Ok(Backend { spec, creds })
 }
@@ -434,6 +465,7 @@ fn backend_region_for_signing(b: &Backend) -> &str {
     match b.spec.backend_type {
         BackendType::S3 => b.spec.region_or_account.as_str(),
         BackendType::R2 => "auto",
+        BackendType::Http => "",
     }
 }
 
@@ -447,6 +479,7 @@ fn backend_host(b: &Backend) -> String {
                 r2_host(&b.spec.region_or_account)
             }
         }
+        BackendType::Http => "".to_string(),
     }
 }
 
@@ -462,15 +495,25 @@ fn canonical_uri_for_object(b: &Backend, key: &str) -> String {
                 format!("/{}/{}", pct_encode(&b.spec.bucket), pct_encode_path(key))
             }
         }
+        BackendType::Http => format!("/{}", pct_encode_path(key)),
     }
 }
 
 fn object_url(b: &Backend, key: &str, query: Option<&str>) -> String {
+    if b.spec.backend_type == BackendType::Http {
+        let base = b.spec.bucket.trim_end_matches('/');
+        let path = pct_encode_path(key);
+        match query {
+            Some(q) if !q.is_empty() => format!("{}/{}?{}", base, path, q),
+            _ => format!("{}/{}", base, path),
+        }
+    } else {
     let host = backend_host(b);
     let uri = canonical_uri_for_object(b, key);
     match query {
         Some(q) if !q.is_empty() => format!("https://{}{}?{}", host, uri, q),
         _ => format!("https://{}{}", host, uri),
+    }
     }
 }
 
@@ -686,6 +729,9 @@ async fn put_object(http: &HttpClient, b: &Backend, key: &str, body: Bytes) -> R
 }
 
 async fn ensure_bucket_and_objects(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<()> {
+    if b.spec.backend_type == BackendType::Http {
+        return Err(anyhow!("--ensure is not supported for http backends"));
+    }
     if b.creds.is_none() {
         return Err(anyhow!(
             "--ensure requires credentials for {:?}. For S3 set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY; for R2 set R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY.\nIf you don't have credentials, omit --ensure and use public-read objects.",
@@ -738,6 +784,7 @@ async fn run_download(
     http: &HttpClient,
     urls: Arc<Vec<String>>,
     cfg: &RunConfig,
+    label: &str,
 ) -> Result<(u64, u64, u64, f64, f64)> {
     let sem = Arc::new(Semaphore::new(cfg.concurrency));
     let idx = Arc::new(AtomicUsize::new(0));
@@ -748,6 +795,34 @@ async fn run_download(
     let start = Instant::now();
     let until = start + Duration::from_secs(cfg.duration_secs);
     let mut handles = Vec::with_capacity(cfg.concurrency * 2);
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let progress_task = if cfg.progress {
+        let stop = stop.clone();
+        let bytes = bytes.clone();
+        let transfers = transfers.clone();
+        let successes = successes.clone();
+        let label = label.to_string();
+        let interval = Duration::from_millis(cfg.progress_interval_ms.max(200));
+        let duration_secs = cfg.duration_secs;
+        Some(tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                let elapsed = start.elapsed().as_secs_f64().max(0.001);
+                let b = bytes.load(Ordering::Relaxed);
+                let t = transfers.load(Ordering::Relaxed);
+                let ok = successes.load(Ordering::Relaxed);
+                let gbps = (b as f64 * 8.0) / elapsed / 1_000_000_000.0;
+                let left = duration_secs.saturating_sub(start.elapsed().as_secs());
+                eprintln!(
+                    "[{}] {:.0}s elapsed, {}s left | xfers={} ok={} bytes={} | {:.3} Gbps",
+                    label, elapsed, left, t, ok, b, gbps
+                );
+                tokio::time::sleep(interval).await;
+            }
+        }))
+    } else {
+        None
+    };
 
     while Instant::now() < until {
         let permit = match sem.clone().try_acquire_owned() {
@@ -801,6 +876,11 @@ async fn run_download(
             let remaining = drain_timeout.saturating_sub(drain_start.elapsed());
             let _ = tokio::time::timeout(remaining, h).await;
         }
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    if let Some(t) = progress_task {
+        let _ = t.await;
     }
 
     let elapsed = start.elapsed().as_secs_f64().max(0.001);
@@ -1025,6 +1105,8 @@ async fn main() -> Result<()> {
                 prefix: args.prefix,
                 file_count: args.file_count,
                 file_size_mb: args.file_size_mb,
+                progress: args.progress && matches!(args.output, OutputArg::Human),
+                progress_interval_ms: args.progress_interval_ms,
             };
 
             let http = HttpClient::builder()
@@ -1098,7 +1180,7 @@ async fn main() -> Result<()> {
                     }
                     let started = Utc::now();
                     let (bytes, transfers, successes, gbps, elapsed) =
-                        run_download(&http, Arc::new(urls), &cfg).await?;
+                        run_download(&http, Arc::new(urls), &cfg, &format!("{}", b.spec.name)).await?;
                     all_results.push(BackendRunResult {
                         timestamp: started,
                         backend_type: b.spec.backend_type,

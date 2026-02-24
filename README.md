@@ -86,6 +86,8 @@ Comma-separated specs:
 
 - S3: `bucket:region` (e.g. `my-bkt:eu-north-1`)
 - R2: `r2:bucket:account_id` or `r2:bucket` (uses `R2_ACCOUNT_ID`)
+- Public HTTP origin: `https://...`
+  - Use this for CloudFront (`https://d111111abcdef8.cloudfront.net`) or Cloudflare public R2 (`https://pub-xxxx.r2.dev`).
 
 ## Credentials
 
