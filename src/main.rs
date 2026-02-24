@@ -1150,6 +1150,58 @@ fn ansi(color: &str, s: &str) -> String {
     format!("\x1b[{}m{}\x1b[0m", color, s)
 }
 
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    if max <= 3 {
+        return s[..max].to_string();
+    }
+    format!("{}...", &s[..max - 3])
+}
+
+fn url_host(url: &str) -> String {
+    let u = url.trim();
+    let u = u
+        .strip_prefix("https://")
+        .or_else(|| u.strip_prefix("http://"))
+        .unwrap_or(u);
+    u.split('/').next().unwrap_or(u).to_string()
+}
+
+fn fmt_rate(successes: u64, transfers: u64) -> String {
+    if transfers == 0 {
+        return "0.0%".to_string();
+    }
+    format!("{:.1}%", (successes as f64) * 100.0 / (transfers as f64))
+}
+
+fn fmt_u64_compact(v: u64) -> String {
+    const K: f64 = 1_000.0;
+    const M: f64 = 1_000_000.0;
+    const B: f64 = 1_000_000_000.0;
+    let f = v as f64;
+    if v >= 10_000_000_000 {
+        format!("{:.1}B", f / B)
+    } else if v >= 10_000_000 {
+        format!("{:.1}M", f / M)
+    } else if v >= 10_000 {
+        format!("{:.1}K", f / K)
+    } else {
+        v.to_string()
+    }
+}
+
+fn p90(values: &mut [f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = values.len();
+    let idx = (((n as f64) * 0.90).ceil() as usize).saturating_sub(1);
+    values[idx.min(n - 1)]
+}
+
 fn grade_color(grade: &str) -> &'static str {
     match grade {
         "A+" | "A" => "32", // green
@@ -1161,7 +1213,7 @@ fn grade_color(grade: &str) -> &'static str {
 
 fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Path>) {
     println!(
-        "Config: concurrency={} duration={}s prefix={} file_count={} file_size_mb={}\n",
+        "Config: conc={} dur={}s prefix={} files={}x{}MB\n",
         results.config.concurrency,
         results.config.duration_secs,
         results.config.prefix,
@@ -1196,20 +1248,94 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         } else {
             r.grade.clone()
         };
+
+        let id = match r.backend_type {
+            BackendType::S3 => {
+                let b = r.bucket.split('-').last().unwrap_or(r.bucket.as_str());
+                format!("s3:{}", b)
+            }
+            BackendType::R2 => {
+                let b = r.bucket.split('-').last().unwrap_or(r.bucket.as_str());
+                format!("r2:{}", b)
+            }
+            BackendType::Http => format!("http:{}", url_host(&r.bucket)),
+        };
+        let id = truncate(&id, 24);
+        let region = if r.region_or_account.is_empty() {
+            "-".to_string()
+        } else {
+            r.region_or_account.clone()
+        };
+        let ok = fmt_u64_compact(r.successes);
+        let tot = fmt_u64_compact(r.transfers);
+        let rate = fmt_rate(r.successes, r.transfers);
+        let gb = (r.bytes as f64) / 1_000_000_000.0;
         println!(
-            "{:<8} {:<26} {:<3} {:>8.3} Gbps  ok={}/{} bytes={}  ({}/{})",
+            "{:<8} {:<24} {:>6.2}Gbps {:<3} ok {}/{} ({})  {:.1}GB  {}",
             match r.direction {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
             },
-            r.name,
-            grade,
+            id,
             r.throughput_gbps,
-            r.successes,
-            r.transfers,
-            r.bytes,
-            r.bucket,
-            r.region_or_account,
+            grade,
+            ok,
+            tot,
+            rate,
+            gb,
+            region,
+        );
+    }
+
+    for dir in [Direction::Download, Direction::Upload] {
+        let mut tps: Vec<f64> = results
+            .results
+            .iter()
+            .filter(|r| r.direction == dir)
+            .map(|r| r.throughput_gbps)
+            .collect();
+        if tps.is_empty() {
+            continue;
+        }
+
+        let n = tps.len() as f64;
+        let sum: f64 = tps.iter().sum();
+        let avg = sum / n;
+        let mut sorted = tps.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let min = *sorted.first().unwrap_or(&0.0);
+        let max = *sorted.last().unwrap_or(&0.0);
+        let p90v = p90(&mut tps);
+
+        let (ok_sum, tot_sum) = results
+            .results
+            .iter()
+            .filter(|r| r.direction == dir)
+            .fold((0u64, 0u64), |(ok, tot), r| {
+                (ok + r.successes, tot + r.transfers)
+            });
+        let rate = fmt_rate(ok_sum, tot_sum);
+        let g = grade(avg);
+        let g = if !no_color && std::io::stdout().is_terminal() {
+            ansi(grade_color(g), g)
+        } else {
+            g.to_string()
+        };
+
+        println!(
+            "\n{:>8} stats: avg={:.2}Gbps {}  p90={:.2}  min={:.2}  max={:.2}  ok={}/{} ({})",
+            match dir {
+                Direction::Download => "download",
+                Direction::Upload => "upload",
+            },
+            avg,
+            g,
+            p90v,
+            min,
+            max,
+            fmt_u64_compact(ok_sum),
+            fmt_u64_compact(tot_sum),
+            rate
         );
     }
 
