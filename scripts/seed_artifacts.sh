@@ -19,6 +19,9 @@ need dd
 #     skip-existing -> HEAD each object and only upload if missing
 SEED_CONCURRENCY="${SEED_CONCURRENCY:-16}"
 SEED_MODE="${SEED_MODE:-overwrite}"
+# If the bucket already appears to have the artifacts (prefix.0 and prefix.(file_count-1)),
+# skip uploading objects for that bucket.
+SEED_SKIP_IF_PRESENT="${SEED_SKIP_IF_PRESENT:-1}"
 
 sanitize_no_newlines() {
   # Drop CR/LF characters (common when secrets are copied with trailing newline)
@@ -204,6 +207,17 @@ ensure_s3_bucket() {
 seed_objects_s3() {
   local bucket="$1" region="$2" payload_path="$3"
 
+  if [[ "$SEED_SKIP_IF_PRESENT" == "1" ]]; then
+    local first last
+    first="${PREFIX}.0"
+    last="${PREFIX}.$((FILE_COUNT-1))"
+    if aws s3api head-object --bucket "$bucket" --key "$first" --region "$region" >/dev/null 2>&1 \
+      && aws s3api head-object --bucket "$bucket" --key "$last" --region "$region" >/dev/null 2>&1; then
+      echo "Skipping object seeding for $bucket ($region): artifacts already present" >&2
+      return 0
+    fi
+  fi
+
   export PREFIX FILE_COUNT
   case "$SEED_MODE" in
     overwrite|skip-existing) ;;
@@ -249,6 +263,25 @@ seed_objects_r2() {
   : "${R2_ACCESS_KEY_ID:?missing R2_ACCESS_KEY_ID}"
   : "${R2_SECRET_ACCESS_KEY:?missing R2_SECRET_ACCESS_KEY}"
   export PREFIX FILE_COUNT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+
+  if [[ "$SEED_SKIP_IF_PRESENT" == "1" ]]; then
+    local first last
+    first="${PREFIX}.0"
+    last="${PREFIX}.$((FILE_COUNT-1))"
+    if AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
+       AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
+       AWS_SESSION_TOKEN="" \
+       AWS_REGION="auto" \
+       aws --endpoint-url "$endpoint" s3api head-object --bucket "$bucket" --key "$first" >/dev/null 2>&1 \
+      && AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
+         AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
+         AWS_SESSION_TOKEN="" \
+         AWS_REGION="auto" \
+         aws --endpoint-url "$endpoint" s3api head-object --bucket "$bucket" --key "$last" >/dev/null 2>&1; then
+      echo "Skipping object seeding for r2:$bucket: artifacts already present" >&2
+      return 0
+    fi
+  fi
   case "$SEED_MODE" in
     overwrite|skip-existing) ;;
     *) die "Invalid SEED_MODE: $SEED_MODE (use overwrite or skip-existing)";;

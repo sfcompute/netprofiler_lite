@@ -68,6 +68,7 @@ Seeding speed knobs:
 - `SEED_CONCURRENCY=16` (default): parallel uploads per bucket/region
 - `SEED_MODE=overwrite` (default): always upload objects (fastest)
 - `SEED_MODE=skip-existing`: HEAD objects first and only upload missing
+- `SEED_SKIP_IF_PRESENT=1` (default): if `${PREFIX}.0` and `${PREFIX}.(file_count-1)` exist, skip uploading objects
 
 Or as a flake app:
 
