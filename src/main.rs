@@ -1310,15 +1310,18 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         results.config.file_size_mb
     );
 
-    println!("Legend:");
-    println!("- thrpt: goodput in Gbps (only successful bytes)");
-    println!("- bytes: successful bytes transferred");
-    println!("- ok/req: successful requests / attempted requests");
-    println!("- errs: errors during request send + HTTP status buckets\n");
+    println!(
+        "Columns: thrpt=Gbps (successful bytes only) | bytes=successful bytes | ok/req=successful/attempted requests | ok%=success rate | errs=net(send)+HTTP buckets\n"
+    );
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
     }
+
+    println!(
+        "{:<8} {:<24} {:<12} {:>7} {:<3} {:>8} {:>14} {:>6} {}",
+        "dir", "endpoint", "region", "thrpt", "gr", "bytes", "ok/req", "ok%", "errs"
+    );
 
     let mut rows = results.results.clone();
     fn dir_key(d: Direction) -> u8 {
@@ -1365,8 +1368,36 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         let tot = fmt_u64_compact(r.transfers);
         let rate = fmt_rate(r.successes, r.transfers);
         let gb = (r.bytes as f64) / 1_000_000_000.0;
+
+        let other_http = r
+            .http_non_success
+            .saturating_sub(r.http_4xx)
+            .saturating_sub(r.http_429)
+            .saturating_sub(r.http_5xx);
+        let errs = if r.network_errors == 0
+            && r.http_4xx == 0
+            && r.http_429 == 0
+            && r.http_5xx == 0
+            && other_http == 0
+        {
+            "-".to_string()
+        } else {
+            let mut s = format!(
+                "net={} 4xx={} 429={} 5xx={} other={}",
+                fmt_u64_compact(r.network_errors),
+                fmt_u64_compact(r.http_4xx),
+                fmt_u64_compact(r.http_429),
+                fmt_u64_compact(r.http_5xx),
+                fmt_u64_compact(other_http),
+            );
+            if r.http_429 > 0 {
+                s.push_str(" (rate_limited)");
+            }
+            s
+        };
+
         println!(
-            "{:<8} {:<24} region={:<12} thrpt={:>5.2}Gbps {:<3} bytes={:>5.1}GB",
+            "{:<8} {:<24} {:<12} {:>7.2} {:<3} {:>7.1}GB {:>7} {:>6} {}",
             match r.direction {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
@@ -1376,32 +1407,10 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             r.throughput_gbps,
             grade,
             gb,
-        );
-
-        let other_http = r
-            .http_non_success
-            .saturating_sub(r.http_4xx)
-            .saturating_sub(r.http_429)
-            .saturating_sub(r.http_5xx);
-        println!(
-            "         {:<24} ok/req={}/{} ({})  errs: net={} http4xx={} http429={} http5xx={} other_http={}",
-            "",
-            ok,
-            tot,
+            format!("{}/{}", ok, tot),
             rate,
-            fmt_u64_compact(r.network_errors),
-            fmt_u64_compact(r.http_4xx),
-            fmt_u64_compact(r.http_429),
-            fmt_u64_compact(r.http_5xx),
-            fmt_u64_compact(other_http),
+            errs,
         );
-
-        if r.http_429 > 0 {
-            println!(
-                "         {:<24} note: HTTP 429 suggests rate limiting; goodput may be capped",
-                "",
-            );
-        }
     }
 
     for dir in [Direction::Download, Direction::Upload] {
