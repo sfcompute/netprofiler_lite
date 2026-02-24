@@ -1079,12 +1079,14 @@ async fn main() -> Result<()> {
                         }
                     }
                     if let Some(u) = urls.first() {
-                        let status = http
-                            .get(u)
-                            .send()
-                            .await
-                            .map(|r| r.status())
-                            .unwrap_or(reqwest::StatusCode::from_u16(0).unwrap());
+                        let resp = http.get(u).send().await;
+                        let resp = resp.with_context(|| {
+                            format!(
+                                "preflight GET request failed for {} (url={})",
+                                b.spec.name, u
+                            )
+                        })?;
+                        let status = resp.status();
                         if !status.is_success() {
                             return Err(anyhow!(
                                 "preflight GET failed for {} (HTTP {}): expected objects like {}.0",
