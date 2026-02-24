@@ -9,6 +9,7 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -233,6 +234,94 @@ fn s3_creds_from_env() -> Option<Credentials> {
     })
 }
 
+fn aws_profile() -> String {
+    std::env::var("AWS_PROFILE")
+        .or_else(|_| std::env::var("AWS_DEFAULT_PROFILE"))
+        .unwrap_or_else(|_| "default".to_string())
+}
+
+fn aws_shared_credentials_file() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("AWS_SHARED_CREDENTIALS_FILE") {
+        if !p.trim().is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join(".aws").join("credentials"))
+}
+
+fn strip_quotes(s: &str) -> &str {
+    let s = s.trim();
+    if s.len() >= 2 {
+        let bytes = s.as_bytes();
+        if (bytes[0] == b'"' && bytes[s.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[s.len() - 1] == b'\'')
+        {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s
+}
+
+fn parse_ini(contents: &str) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut section: Option<String> = None;
+
+    for raw in contents.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            let name = line[1..line.len() - 1].trim().to_string();
+            section = Some(name);
+            continue;
+        }
+
+        let Some(eq) = line.find('=') else { continue };
+        let key = line[..eq].trim().to_ascii_lowercase();
+        let val = strip_quotes(line[eq + 1..].trim()).to_string();
+        let sec = section.clone().unwrap_or_else(|| "default".to_string());
+        out.entry(sec).or_default().insert(key, val);
+    }
+
+    out
+}
+
+fn s3_creds_from_shared_file(profile: &str) -> Option<Credentials> {
+    let path = aws_shared_credentials_file()?;
+    let contents = std::fs::read_to_string(&path).ok()?;
+    let ini = parse_ini(&contents);
+    let sec = ini.get(profile)?;
+
+    // Support both aws_* keys and uppercase variants if present.
+    let access_key_id = sec
+        .get("aws_access_key_id")
+        .or_else(|| sec.get("access_key_id"))
+        .cloned()?;
+    let secret_access_key = sec
+        .get("aws_secret_access_key")
+        .or_else(|| sec.get("secret_access_key"))
+        .cloned()?;
+    let session_token = sec
+        .get("aws_session_token")
+        .or_else(|| sec.get("session_token"))
+        .cloned();
+
+    Some(Credentials {
+        access_key_id,
+        secret_access_key,
+        session_token,
+    })
+}
+
+fn s3_creds() -> Option<Credentials> {
+    s3_creds_from_env().or_else(|| s3_creds_from_shared_file(&aws_profile()))
+}
+
 fn r2_creds_from_env() -> Option<Credentials> {
     let access_key_id = std::env::var("R2_ACCESS_KEY_ID").ok()?;
     let secret_access_key = std::env::var("R2_SECRET_ACCESS_KEY").ok()?;
@@ -245,7 +334,7 @@ fn r2_creds_from_env() -> Option<Credentials> {
 
 fn make_backend(spec: BackendSpec) -> Result<Backend> {
     let creds = match spec.backend_type {
-        BackendType::S3 => s3_creds_from_env(),
+        BackendType::S3 => s3_creds(),
         BackendType::R2 => r2_creds_from_env(),
     };
     Ok(Backend { spec, creds })

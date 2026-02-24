@@ -21,7 +21,6 @@ curl -L https://install.determinate.systems/nix | sh -s -- install
 Open a new shell, then:
 
 ```bash
-cd netprofiler_lite
 nix develop --accept-flake-config
 ```
 
@@ -46,7 +45,6 @@ Use this to seed S3/R2 objects so partners can run download benchmarks without c
 Run with Nix + Doppler (no secrets written to disk):
 
 ```bash
-cd netprofiler_lite
 
 # Optional: set explicit bucket names.
 # If omitted, the seeder defaults to globally-unique names based on your AWS account id.
@@ -69,7 +67,6 @@ nix develop --accept-flake-config -c doppler run --project cloudflare --config p
 Or as a flake app:
 
 ```bash
-cd netprofiler_lite
 nix run .#seed --accept-flake-config
 ```
 
@@ -83,9 +80,13 @@ Comma-separated specs:
 ## Credentials
 
 S3 (AWS):
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- optional: `AWS_SESSION_TOKEN`
+- Prefers env vars:
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+  - optional: `AWS_SESSION_TOKEN`
+- Also supports standard shared credentials:
+  - `~/.aws/credentials` (respects `AWS_PROFILE` / `AWS_DEFAULT_PROFILE`)
+  - optional: `AWS_SHARED_CREDENTIALS_FILE`
 
 R2:
 - `R2_ACCESS_KEY_ID`
@@ -95,6 +96,12 @@ R2:
 If you don't have credentials:
 - You can still run `--direction download` as long as the objects are public-read.
 - Omit `--ensure` (it requires credentials to check/create/seed).
+
+Tip: if you need `aws configure`, run it inside the Nix dev shell:
+
+```bash
+nix develop --accept-flake-config -c aws configure
+```
 
 ## Typical run (download)
 
