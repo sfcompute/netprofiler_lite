@@ -10,32 +10,48 @@ Goals:
 This is intended to be shared with providers (e.g. NDG) to reproduce observed results
 without distributing any proprietary binaries or internal agent code.
 
-## Deterministic dev env (recommended)
+Key point for distribution: partners should only need public-readable objects (no AWS/R2
+credentials) to run download benchmarks.
 
-Install Determinate Nix:
+## Partner quickstart (recommended)
 
-```bash
-curl -L https://install.determinate.systems/nix | sh -s -- install
-```
-
-Open a new shell, then:
+1) Build with Nix (deterministic):
 
 ```bash
-nix develop --accept-flake-config
+nix build --accept-flake-config
+./result/bin/netprofiler_lite --help
 ```
 
-Inside the dev shell:
+Or build with Rust toolchain:
 
 ```bash
 cargo build --release
 ./target/release/netprofiler_lite --help
 ```
 
-You can also build and run via Nix:
+2) Configure backends
+
+Edit `netprofiler_lite.toml` and set `backends = [...]`.
+
+- S3: `"bucket:region"` (objects must be public-read)
+- Cloudflare R2 (public): use the bucket *public origin* as `"https://pub-<id>.r2.dev"`
+
+3) Run
 
 ```bash
-nix build --accept-flake-config
-./result/bin/netprofiler_lite --help
+./result/bin/netprofiler_lite
+# or
+./target/release/netprofiler_lite
+```
+
+The binary reads `./netprofiler_lite.toml` automatically when present. CLI flags override config.
+
+## CLI shape
+
+There are no subcommands. Everything is a top-level flag:
+
+```bash
+./target/release/netprofiler_lite --backends "bkt:us-west-2,https://pub-....r2.dev" --duration 60
 ```
 
 ## Preseed artifacts (SF Compute side)

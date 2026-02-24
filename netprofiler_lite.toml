@@ -7,7 +7,7 @@
 # Supported entries:
 # - S3: "bucket:region"
 # - R2 (authenticated): "r2:bucket:account_id" (requires R2_* env vars)
-# - Public HTTP origin: "https://..." (CloudFront, public R2, etc.)
+# - Public HTTP origin: "https://..." (CloudFront, R2 public origins like https://pub-<id>.r2.dev)
 
 backends = [
   # S3 buckets (public-read objects required for no-credential runs)
@@ -30,7 +30,7 @@ file_size_mb = 8
 
 output = "human"         # human|json|csv|toml
 
-# Write a TOML report file (in addition to stdout output). Set to false to disable.
+# Write a TOML report file (in addition to stdout output). Set no_report_toml=true to disable.
 report_toml = "netprofiler_lite_report.toml"
 # no_report_toml = true
 
