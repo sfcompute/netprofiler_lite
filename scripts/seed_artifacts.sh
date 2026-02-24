@@ -50,6 +50,7 @@ load_aws_creds_from_shared_file() {
 
   # Parse minimal INI: find [profile] section and read keys.
   local in_section=0 line key val
+  local profiles_seen=""
   local ak="" sk="" st=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"
@@ -57,6 +58,11 @@ load_aws_creds_from_shared_file() {
     line="$(trim "$line")"
     [[ -z "$line" ]] && continue
     if [[ "$line" =~ ^\[(.*)\]$ ]]; then
+      if [[ -z "$profiles_seen" ]]; then
+        profiles_seen="${BASH_REMATCH[1]}"
+      else
+        profiles_seen="${profiles_seen},${BASH_REMATCH[1]}"
+      fi
       if [[ "${BASH_REMATCH[1]}" == "$profile" ]]; then
         in_section=1
       else
@@ -96,6 +102,10 @@ load_aws_creds_from_shared_file() {
     fi
   else
     echo "WARN: No static keys found in $credfile (profile=$profile)" >&2
+    if [[ -n "$profiles_seen" ]]; then
+      echo "WARN: Profiles present in $credfile: $profiles_seen" >&2
+      echo "WARN: Set AWS_PROFILE to one of those profile names." >&2
+    fi
   fi
 }
 
