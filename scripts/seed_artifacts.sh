@@ -201,7 +201,7 @@ seed_objects_s3() {
     *) die "Invalid SEED_MODE: $SEED_MODE (use overwrite or skip-existing)";;
   esac
 
-  seq 0 $((FILE_COUNT-1)) | xargs -n 1 -P "$SEED_CONCURRENCY" -I {} bash -c '
+  seq 0 $((FILE_COUNT-1)) | xargs -P "$SEED_CONCURRENCY" -I {} bash -c '
     set -euo pipefail
     i="{}"
     key="${PREFIX}.${i}"
@@ -241,7 +241,7 @@ seed_objects_r2() {
     *) die "Invalid SEED_MODE: $SEED_MODE (use overwrite or skip-existing)";;
   esac
 
-  seq 0 $((FILE_COUNT-1)) | xargs -n 1 -P "$SEED_CONCURRENCY" -I {} bash -c '
+  seq 0 $((FILE_COUNT-1)) | xargs -P "$SEED_CONCURRENCY" -I {} bash -c '
     set -euo pipefail
     i="{}"
     key="${PREFIX}.${i}"
