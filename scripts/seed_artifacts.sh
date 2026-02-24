@@ -11,6 +11,7 @@ need() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; 
 
 need aws
 need dd
+need curl
 
 # Speed knobs
 # - SEED_CONCURRENCY: parallelism per bucket/region
@@ -191,6 +192,37 @@ EOF
     >/dev/null
 
   aws s3api put-bucket-policy --bucket "$bucket" --policy "$policy" >/dev/null
+}
+
+verify_s3_public_get() {
+  # args: bucket region key
+  local bucket="$1" region="$2" key="$3"
+  local url
+  if [[ "$region" == "us-east-1" ]]; then
+    url="https://${bucket}.s3.amazonaws.com/${key}"
+  else
+    url="https://${bucket}.s3.${region}.amazonaws.com/${key}"
+  fi
+
+  local code
+  code="$(curl -sS -o /dev/null -I -w '%{http_code}' --connect-timeout 5 --max-time 20 "$url" || echo 000)"
+  case "$code" in
+    200|206|301|302|307|308)
+      echo "INFO: Public S3 OK: $url (HTTP $code)" >&2
+      ;;
+    403)
+      die "Public S3 check failed (403) for $url. Likely causes: account-level Block Public Access, bucket default KMS encryption, or policy not applied."
+      ;;
+    404)
+      die "Public S3 check failed (404) for $url. Object missing: ${key}"
+      ;;
+    000)
+      die "Public S3 check failed (no response) for $url. Check DNS/egress/firewall."
+      ;;
+    *)
+      die "Public S3 check failed (HTTP $code) for $url"
+      ;;
+  esac
 }
 
 ensure_s3_bucket() {

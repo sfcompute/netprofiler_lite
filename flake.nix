@@ -46,6 +46,7 @@
             pkgs.pkg-config
 
             pkgs.awscli2
+            pkgs.curl
             pkgs.doppler
 
             toolchain.cargo
@@ -58,7 +59,7 @@
         apps.seed = flake-utils.lib.mkApp {
           drv = pkgs.writeShellApplication {
             name = "seed_artifacts";
-            runtimeInputs = [ pkgs.bash pkgs.awscli2 pkgs.coreutils pkgs.doppler ];
+            runtimeInputs = [ pkgs.bash pkgs.awscli2 pkgs.coreutils pkgs.curl pkgs.doppler ];
             text = ''
               exec bash "${self}/scripts/seed_artifacts.sh" "$@"
             '';
