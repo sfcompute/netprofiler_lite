@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, Parser, ValueEnum};
+use comfy_table::{presets::ASCII_FULL, ContentArrangement, Table};
 use futures::StreamExt;
 use hmac::{Hmac, Mac};
 use reqwest::Client as HttpClient;
@@ -1590,16 +1591,11 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         results.config.file_size_mb
     );
 
-    println!("Metrics:");
-    println!("- thrpt_gbps: total goodput over the whole test window (successful bytes only)");
-    println!("- win_gbps: 500ms goodput samples across the run (successful bytes only)");
-    println!("- obj_mib_s + req_ms: per-success request stats (one object per request)\n");
+    println!("Metrics: thrpt_gbps(total), win_gbps(avg/p90/max, 500ms samples), obj_mib_s+req_ms(p50/p90 per successful request)\n");
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
     }
-
-    // Per-endpoint blocks are easier to scan than very wide tables.
 
     let mut rows = results.results.clone();
     fn dir_key(d: Direction) -> u8 {
@@ -1618,6 +1614,25 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             })
     });
 
+    let mut table = Table::new();
+    table
+        .load_preset(ASCII_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header([
+            "dir",
+            "type",
+            "endpoint",
+            "region",
+            "thrpt_gbps",
+            "grade",
+            "bytes_gb",
+            "ok%",
+            "win_gbps a/p90/max",
+            "obj_mib_s p50/p90",
+            "req_ms p50/p90",
+            "errs",
+        ]);
+
     for r in &rows {
         let grade = if !no_color && std::io::stdout().is_terminal() {
             ansi(grade_color(&r.grade), &r.grade)
@@ -1633,8 +1648,8 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         } else {
             r.region_or_account.clone()
         };
-        let ok = fmt_u64_compact(r.successes);
-        let tot = fmt_u64_compact(r.transfers);
+        let _ok = fmt_u64_compact(r.successes);
+        let _tot = fmt_u64_compact(r.transfers);
         let rate = fmt_rate(r.successes, r.transfers);
         let gb = (r.bytes as f64) / 1_000_000_000.0;
 
@@ -1665,66 +1680,52 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             s
         };
 
-        println!(
-            "{:<8} {:<9} {:<24} region={:<12} thrpt_gbps={:>5.2} {} bytes={:>5.1}GB ok/req={}/{} ({})",
+        let win = if r.window_samples == 0 {
+            "-".to_string()
+        } else {
+            format!(
+                "{:.2}/{:.2}/{:.2}",
+                r.window_gbps_mean, r.window_gbps_p90, r.window_gbps_max
+            )
+        };
+
+        let obj_mib = if r.req_samples == 0 {
+            "-".to_string()
+        } else {
+            format!(
+                "{:.1}/{:.1}",
+                gbps_to_mibs_per_sec(r.req_gbps_p50),
+                gbps_to_mibs_per_sec(r.req_gbps_p90)
+            )
+        };
+
+        let req_ms = if r.req_samples == 0 {
+            "-".to_string()
+        } else {
+            format!("{:.0}/{:.0}", r.req_ms_p50, r.req_ms_p90)
+        };
+
+        table.add_row([
             match r.direction {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
-            },
-            typ,
+            }
+            .to_string(),
+            typ.to_string(),
             id,
             region,
-            r.throughput_gbps,
+            format!("{:.2}", r.throughput_gbps),
             grade,
-            gb,
-            ok,
-            tot,
+            format!("{:.1}", gb),
             rate,
-        );
-
-        let win = if r.window_samples == 0 {
-            "win_gbps=-".to_string()
-        } else {
-            format!(
-                "win_gbps(avg/p50/p90/min/max)={:.2}/{:.2}/{:.2}/{:.2}/{:.2}",
-                r.window_gbps_mean,
-                r.window_gbps_p50,
-                r.window_gbps_p90,
-                r.window_gbps_min,
-                r.window_gbps_max
-            )
-        };
-
-        let obj = if r.req_samples == 0 {
-            "obj_mib_s=- req_ms=-".to_string()
-        } else {
-            let mib_mean = gbps_to_mibs_per_sec(r.req_gbps_mean);
-            let mib_p50 = gbps_to_mibs_per_sec(r.req_gbps_p50);
-            let mib_p90 = gbps_to_mibs_per_sec(r.req_gbps_p90);
-            let mib_min = gbps_to_mibs_per_sec(r.req_gbps_min);
-            let mib_max = gbps_to_mibs_per_sec(r.req_gbps_max);
-            format!(
-                "obj_mib_s(m/p50/p90/min/max)={:.1}/{:.1}/{:.1}/{:.1}/{:.1} req_ms(m/p50/p90/min/max)={:.0}/{:.0}/{:.0}/{:.0}/{:.0} (n={})",
-                mib_mean,
-                mib_p50,
-                mib_p90,
-                mib_min,
-                mib_max,
-                r.req_ms_mean,
-                r.req_ms_p50,
-                r.req_ms_p90,
-                r.req_ms_min,
-                r.req_ms_max,
-                r.req_samples
-            )
-        };
-
-        if errs == "-" {
-            println!("         {} | {}\n", win, obj);
-        } else {
-            println!("         {} | {} | errs: {}\n", win, obj, errs);
-        }
+            win,
+            obj_mib,
+            req_ms,
+            errs,
+        ]);
     }
+
+    println!("{}", table);
 
     for dir in [Direction::Download, Direction::Upload] {
         let mut tps: Vec<f64> = results
