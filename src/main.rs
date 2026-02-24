@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, Parser, ValueEnum};
-use comfy_table::{presets::ASCII_FULL, ContentArrangement, Table};
+use comfy_table::{presets::ASCII_MARKDOWN, ContentArrangement, Table};
 use futures::StreamExt;
 use hmac::{Hmac, Mac};
 use reqwest::Client as HttpClient;
@@ -1614,77 +1614,84 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             })
     });
 
+    fn errs_compact(r: &BackendRunResult) -> String {
+        let other_http = r
+            .http_non_success
+            .saturating_sub(r.http_4xx)
+            .saturating_sub(r.http_429)
+            .saturating_sub(r.http_5xx);
+        if r.network_errors == 0
+            && r.http_4xx == 0
+            && r.http_429 == 0
+            && r.http_5xx == 0
+            && other_http == 0
+        {
+            return "-".to_string();
+        }
+
+        let mut parts: Vec<String> = Vec::new();
+        if r.network_errors > 0 {
+            parts.push(format!("net={}", fmt_u64_compact(r.network_errors)));
+        }
+        if r.http_4xx > 0 {
+            parts.push(format!("4xx={}", fmt_u64_compact(r.http_4xx)));
+        }
+        if r.http_429 > 0 {
+            parts.push(format!("429={}", fmt_u64_compact(r.http_429)));
+        }
+        if r.http_5xx > 0 {
+            parts.push(format!("5xx={}", fmt_u64_compact(r.http_5xx)));
+        }
+        if other_http > 0 {
+            parts.push(format!("other={}", fmt_u64_compact(other_http)));
+        }
+        if r.http_429 > 0 {
+            parts.push("rl".to_string());
+        }
+        truncate(&parts.join(","), 28)
+    }
+
     let mut table = Table::new();
     table
-        .load_preset(ASCII_FULL)
-        .set_content_arrangement(ContentArrangement::Dynamic)
+        .load_preset(ASCII_MARKDOWN)
+        // Avoid auto-wrapping into multi-line cells; truncate instead.
+        .set_content_arrangement(ContentArrangement::Disabled)
         .set_header([
             "dir",
             "type",
             "endpoint",
             "region",
-            "thrpt_gbps",
-            "grade",
-            "bytes_gb",
+            "thrpt",
+            "gr",
+            "GB",
             "ok%",
-            "win_gbps a/p90/max",
-            "obj_mib_s p50/p90",
-            "req_ms p50/p90",
+            "win(a/p90/max)",
+            "objMiB/s(p50/p90)",
+            "reqms(p50/p90)",
             "errs",
         ]);
 
     for r in &rows {
-        let grade = if !no_color && std::io::stdout().is_terminal() {
-            ansi(grade_color(&r.grade), &r.grade)
-        } else {
-            r.grade.clone()
-        };
+        // ANSI escape codes tend to break table layout; keep grades plain.
+        let grade = r.grade.clone();
 
-        let id = endpoint_id(r.backend_type, &r.bucket);
-        let id = truncate(&id, 24);
+        let id = truncate(&endpoint_id(r.backend_type, &r.bucket), 18);
         let typ = backend_label(r.backend_type, &r.bucket);
         let region = if r.region_or_account.is_empty() {
             "-".to_string()
         } else {
             r.region_or_account.clone()
         };
-        let _ok = fmt_u64_compact(r.successes);
-        let _tot = fmt_u64_compact(r.transfers);
         let rate = fmt_rate(r.successes, r.transfers);
         let gb = (r.bytes as f64) / 1_000_000_000.0;
 
-        let other_http = r
-            .http_non_success
-            .saturating_sub(r.http_4xx)
-            .saturating_sub(r.http_429)
-            .saturating_sub(r.http_5xx);
-        let errs = if r.network_errors == 0
-            && r.http_4xx == 0
-            && r.http_429 == 0
-            && r.http_5xx == 0
-            && other_http == 0
-        {
-            "-".to_string()
-        } else {
-            let mut s = format!(
-                "net={} 4xx={} 429={} 5xx={} other={}",
-                fmt_u64_compact(r.network_errors),
-                fmt_u64_compact(r.http_4xx),
-                fmt_u64_compact(r.http_429),
-                fmt_u64_compact(r.http_5xx),
-                fmt_u64_compact(other_http),
-            );
-            if r.http_429 > 0 {
-                s.push_str(" (rate_limited)");
-            }
-            s
-        };
+        let errs = errs_compact(r);
 
         let win = if r.window_samples == 0 {
             "-".to_string()
         } else {
             format!(
-                "{:.2}/{:.2}/{:.2}",
+                "{:.1}/{:.1}/{:.1}",
                 r.window_gbps_mean, r.window_gbps_p90, r.window_gbps_max
             )
         };
