@@ -88,6 +88,10 @@ S3 (AWS):
   - `~/.aws/credentials` (respects `AWS_PROFILE` / `AWS_DEFAULT_PROFILE`)
   - optional: `AWS_SHARED_CREDENTIALS_FILE`
 
+Seeder precedence:
+- By default, `scripts/seed_artifacts.sh` prefers `~/.aws/credentials` over env vars.
+- To force env vars to win, set `AWS_ENV_OVERRIDE=1`.
+
 R2:
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`

@@ -12,6 +12,71 @@ need() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; 
 need aws
 need dd
 
+load_aws_creds_from_shared_file() {
+  # If AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY aren't set, try to source them
+  # from AWS_SHARED_CREDENTIALS_FILE or ~/.aws/credentials.
+  #
+  # This avoids surprises when running via `nix run` where users expect their
+  # standard shared credentials file to be honored.
+  #
+  # Precedence:
+  # - By default, shared credentials file wins ("look there first").
+  # - If you need env vars to override the file, set AWS_ENV_OVERRIDE=1.
+
+  local profile credfile
+  profile="${AWS_PROFILE:-${AWS_DEFAULT_PROFILE:-default}}"
+  credfile="${AWS_SHARED_CREDENTIALS_FILE:-${HOME:-}/.aws/credentials}"
+  [[ -n "${credfile}" ]] || return 0
+  [[ -f "${credfile}" ]] || return 0
+
+  # Parse minimal INI: find [profile] section and read keys.
+  local in_section=0 line key val
+  local ak="" sk="" st=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    line="${line%%;*}"
+    line="$(printf '%s' "$line" | awk '{$1=$1}1')"
+    [[ -z "$line" ]] && continue
+    if [[ "$line" =~ ^\[(.*)\]$ ]]; then
+      if [[ "${BASH_REMATCH[1]}" == "$profile" ]]; then
+        in_section=1
+      else
+        in_section=0
+      fi
+      continue
+    fi
+    (( in_section == 1 )) || continue
+    [[ "$line" == *"="* ]] || continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    key="$(printf '%s' "$key" | awk '{$1=$1}1' | tr '[:upper:]' '[:lower:]')"
+    val="$(printf '%s' "$val" | awk '{$1=$1}1')"
+    # Strip simple quotes
+    val="${val%\"}"; val="${val#\"}"
+    val="${val%\'}"; val="${val#\'}"
+
+    case "$key" in
+      aws_access_key_id|access_key_id) ak="$val" ;;
+      aws_secret_access_key|secret_access_key) sk="$val" ;;
+      aws_session_token|session_token) st="$val" ;;
+    esac
+  done <"$credfile"
+
+  if [[ -n "$ak" && -n "$sk" ]]; then
+    if [[ "${AWS_ENV_OVERRIDE:-0}" == "1" && -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+      return 0
+    else
+      export AWS_ACCESS_KEY_ID="$ak"
+      export AWS_SECRET_ACCESS_KEY="$sk"
+      if [[ -n "$st" ]]; then
+        export AWS_SESSION_TOKEN="$st"
+      fi
+    fi
+  fi
+}
+
+load_aws_creds_from_shared_file
+
 PREFIX="${PREFIX:-data-8m}"
 FILE_COUNT="${FILE_COUNT:-100}"
 FILE_SIZE_MB="${FILE_SIZE_MB:-8}"
