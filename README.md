@@ -20,11 +20,14 @@ Small, shareable object-storage throughput benchmark.
 Prebuilt binary (fastest):
 
 ```bash
+version="$(curl -fsSL https://api.github.com/repos/kennethdsheridan/netprofiler_lite/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
+test -n "$version" || { echo "failed to detect latest version"; exit 1; }
+
 os="$(uname -s)"; arch="$(uname -m)"
 case "${os}-${arch}" in
-  Linux-x86_64) asset="netprofiler_lite-linux-x86_64.tar.gz" ;;
-  Darwin-x86_64) asset="netprofiler_lite-macos-x86_64.tar.gz" ;;
-  Darwin-arm64) asset="netprofiler_lite-macos-arm64.tar.gz" ;;
+  Linux-x86_64) asset="netprofiler_lite-${version}-x86_64-unknown-linux-gnu.tar.gz" ;;
+  Darwin-x86_64) asset="netprofiler_lite-${version}-x86_64-apple-darwin.tar.gz" ;;
+  Darwin-arm64) asset="netprofiler_lite-${version}-aarch64-apple-darwin.tar.gz" ;;
   *) echo "unsupported: ${os}-${arch}"; exit 1 ;;
 esac
 
