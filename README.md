@@ -45,6 +45,7 @@ cargo build --release
 
 ## Docs
 
+- Table of contents:
 - Nix setup: `docs/nix.md`
 - Usage (CLI flags, config, backends, credentials, troubleshooting): `docs/usage.md`
 - Preseeding objects (maintainers): `docs/preseed.md`
