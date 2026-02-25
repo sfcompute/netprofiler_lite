@@ -33,8 +33,19 @@ curl -fsSL -O "${base}/${asset}" -O "${base}/${asset}.sha256"
 shasum -a 256 -c "${asset}.sha256" 2>/dev/null || sha256sum -c "${asset}.sha256"
 tar -xzf "${asset}"
 
-./netprofiler_lite
+sudo install -m 0755 ./netprofiler_lite /usr/local/bin/netprofiler_lite
+
+netprofiler_lite
 ```
+
+Default endpoints (copy/paste; optional):
+
+```bash
+netprofiler_lite \
+  --backends "sf-netprofiler-lite-public-6f9c2e-eun1:eu-north-1,sf-netprofiler-lite-public-6f9c2e-euc1:eu-central-1,sf-netprofiler-lite-public-6f9c2e-usw2:us-west-2,sf-netprofiler-lite-public-6f9c2e-use1:us-east-1,https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev"
+```
+
+Note: running `netprofiler_lite` with no flags already uses the default endpoints.
 
 Nix:
 
