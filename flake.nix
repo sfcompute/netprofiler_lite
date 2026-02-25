@@ -29,6 +29,8 @@
         pkgVersion = cargoToml.package.version;
       in
       {
+        # Package
+        # - `nix build` produces: ./result/bin/netprofiler_lite
         packages.default = rustPlatform.buildRustPackage {
           pname = "netprofiler_lite";
           version = pkgVersion;
@@ -39,6 +41,10 @@
           nativeBuildInputs = [ pkgs.pkg-config ];
         };
 
+        # Apps
+        # - `nix run .` runs the binary
+        # - `nix run .#bench` runs a default benchmark command
+        # - `nix run .#seed` runs the maintainer preseeding script
         apps.default = flake-utils.lib.mkApp {
           drv = self.packages.${system}.default;
         };
@@ -63,6 +69,8 @@
           };
         };
 
+        # Dev shell
+        # - `nix develop` provides the Rust toolchain + utilities used by scripts
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.pkg-config

@@ -27,10 +27,14 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           name="netprofiler_lite-${version}-x86_64-unknown-linux-gnu"
+          alias="netprofiler_lite-linux-x86_64"
           mkdir -p dist
           cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
           tar -C dist -czf "${name}.tar.gz" netprofiler_lite
           sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+          cp "${name}.tar.gz" "${alias}.tar.gz"
+          cp "${name}.tar.gz.sha256" "${alias}.tar.gz.sha256"
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
@@ -57,10 +61,14 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           name="netprofiler_lite-${version}-x86_64-apple-darwin"
+          alias="netprofiler_lite-macos-x86_64"
           mkdir -p dist
           cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
           tar -C dist -czf "${name}.tar.gz" netprofiler_lite
           shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+          cp "${name}.tar.gz" "${alias}.tar.gz"
+          cp "${name}.tar.gz.sha256" "${alias}.tar.gz.sha256"
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
@@ -87,10 +95,14 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           name="netprofiler_lite-${version}-aarch64-apple-darwin"
+          alias="netprofiler_lite-macos-arm64"
           mkdir -p dist
           cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
           tar -C dist -czf "${name}.tar.gz" netprofiler_lite
           shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+          cp "${name}.tar.gz" "${alias}.tar.gz"
+          cp "${name}.tar.gz.sha256" "${alias}.tar.gz.sha256"
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2

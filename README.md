@@ -33,6 +33,29 @@ Credentialed operations are maintainer-only:
 
 ## Partner quickstart (recommended)
 
+Prebuilt binary (fastest)
+
+```bash
+os="$(uname -s)"; arch="$(uname -m)"
+case "${os}-${arch}" in
+  Linux-x86_64) asset="netprofiler_lite-linux-x86_64.tar.gz" ;;
+  Darwin-x86_64) asset="netprofiler_lite-macos-x86_64.tar.gz" ;;
+  Darwin-arm64) asset="netprofiler_lite-macos-arm64.tar.gz" ;;
+  *) echo "unsupported: ${os}-${arch}"; exit 1 ;;
+esac
+
+base="https://github.com/kennethdsheridan/netprofiler_lite/releases/latest/download"
+curl -fsSL -O "${base}/${asset}"
+curl -fsSL -O "${base}/${asset}.sha256"
+shasum -a 256 -c "${asset}.sha256" 2>/dev/null || sha256sum -c "${asset}.sha256"
+tar -xzf "${asset}"
+
+./netprofiler_lite --help
+./netprofiler_lite
+```
+
+Nix (deterministic builds and apps)
+
 0) Install Nix (Determininate Systems, non-interactive)
 
 ```bash
@@ -137,58 +160,13 @@ There are no subcommands. Everything is a top-level flag:
 ./target/release/netprofiler_lite --backends "bkt:us-west-2,https://pub-....r2.dev" --duration 60
 ```
 
+More details: `docs/usage.md`.
+
 ## Maintainer Preseed
 
 Maintainers: see `docs/preseed.md`.
 
-## Backends
-
-Comma-separated specs:
-
-- S3: `bucket:region` (e.g. `my-bkt:eu-north-1`)
-- R2: `r2:bucket:account_id` or `r2:bucket` (uses `R2_ACCOUNT_ID`)
-- Public HTTP origin: `https://...`
-  - Use this for CloudFront (`https://d111111abcdef8.cloudfront.net`) or Cloudflare public R2 (`https://pub-xxxx.r2.dev`).
-
-## Credentials
-
-End-users: you can skip this section.
-
-For end-user download runs, do NOT set any credentials; just run with public backends.
-
-S3 (AWS):
-- Prefers env vars:
-  - `AWS_ACCESS_KEY_ID`
-  - `AWS_SECRET_ACCESS_KEY`
-  - optional: `AWS_SESSION_TOKEN`
-- Also supports standard shared credentials:
-  - `~/.aws/credentials` (respects `AWS_PROFILE` / `AWS_DEFAULT_PROFILE`)
-  - optional: `AWS_SHARED_CREDENTIALS_FILE`
-
-Seeder docs: `docs/preseed.md`.
-
-R2:
-- `R2_ACCESS_KEY_ID`
-- `R2_SECRET_ACCESS_KEY`
-- `R2_ACCOUNT_ID` (if not provided in backend spec)
-
-Note: make sure you're using the intended Cloudflare account id. You can force it when seeding:
-
-```bash
-export R2_ACCOUNT_ID=751a8d4a9f0608f2aa7758b0e8cdd7c1
-```
-
-R2 public access + seeding details: `docs/preseed.md`.
-
-If you don't have credentials:
-- You can still run `--direction download` as long as the objects are public-read.
-- Omit `--ensure` (it requires credentials to check/create/seed).
-
-Tip: if you need `aws configure`, run it inside the Nix dev shell:
-
-```bash
-nix develop --accept-flake-config -c aws configure
-```
+Backend specs, credentials, and troubleshooting: `docs/usage.md`.
 
 ## Typical run (download)
 
