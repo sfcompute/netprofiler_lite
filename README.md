@@ -72,7 +72,25 @@ Prebuilt binaries are published for:
 - Linux x86_64
 - macOS (x86_64 and arm64)
 
-Create a release by pushing a tag like `v0.1.0`.
+Build locally with Nix:
+
+```bash
+nix build --accept-flake-config
+./result/bin/netprofiler_lite --help
+```
+
+Create a GitHub release (CLI):
+
+```bash
+# choose a semver tag (must start with v)
+git tag v0.1.0
+git push origin v0.1.0
+
+# (optional) watch the release workflow
+gh run list --workflow release --limit 5
+```
+
+The release workflow builds via Nix and uploads tarballs + sha256 sums to the GitHub Release.
 
 2) Or build with Rust toolchain
 

@@ -78,6 +78,11 @@ Note: this repo sets `nixConfig.extra-substituters`. Nix will prompt unless you 
 `--accept-flake-config` (as shown) or set `accept-flake-config = true` in your Nix config
 (`~/.config/nix/nix.conf` or `/etc/nix/nix.conf`).
 
+## Release Process (Maintainers)
+
+Releases are created by pushing a `v*` git tag. GitHub Actions builds the binaries via Nix and
+attaches tarballs to the GitHub Release.
+
 ## Seeding Speed Knobs
 
 - `SEED_CONCURRENCY=16` (default): parallel uploads per bucket/region
