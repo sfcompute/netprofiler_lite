@@ -1599,9 +1599,8 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
 
     println!("Legend:");
     println!("- thrpt: total goodput in Gbps (successful bytes only)");
-    println!("- win(a/p90/max): 1s window goodput samples in Gbps (stream-progress bytes)");
-    println!("- objGbps(p50/p90): per-success request goodput in Gbps for a single object");
-    println!("- detail: reqms p50/p90 when healthy; otherwise error summary (e.g. 429=...,rl)\n");
+    println!("- win(a|p90|max): 1s window goodput samples in Gbps (stream-progress bytes)");
+    println!("");
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
@@ -1624,44 +1623,18 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             })
     });
 
-    fn errs_compact(r: &BackendRunResult) -> String {
-        let other_http = r
-            .http_non_success
-            .saturating_sub(r.http_4xx)
-            .saturating_sub(r.http_429)
-            .saturating_sub(r.http_5xx);
-        if r.network_errors == 0
-            && r.http_4xx == 0
-            && r.http_429 == 0
-            && r.http_5xx == 0
-            && other_http == 0
-        {
-            return "-".to_string();
-        }
-
-        let mut parts: Vec<String> = Vec::new();
-        if r.network_errors > 0 {
-            parts.push(format!("net={}", fmt_u64_compact(r.network_errors)));
-        }
-        if r.http_4xx > 0 {
-            parts.push(format!("4xx={}", fmt_u64_compact(r.http_4xx)));
-        }
-        if r.http_429 > 0 {
-            parts.push(format!("429={}", fmt_u64_compact(r.http_429)));
-        }
-        if r.http_5xx > 0 {
-            parts.push(format!("5xx={}", fmt_u64_compact(r.http_5xx)));
-        }
-        if other_http > 0 {
-            parts.push(format!("other={}", fmt_u64_compact(other_http)));
-        }
-        if r.http_429 > 0 {
-            parts.push("rl".to_string());
-        }
-        truncate(&parts.join(","), 28)
-    }
-
     let use_color = !no_color && std::io::stdout().is_terminal();
+
+    fn grade_to_color(g: &str) -> Option<Color> {
+        match g {
+            "A+" | "A" => Some(Color::Green),
+            "B" => Some(Color::Yellow),
+            // DarkYellow reads closer to orange in most terminals
+            "C" => Some(Color::DarkYellow),
+            "D" => Some(Color::Red),
+            _ => None,
+        }
+    }
 
     let mut table = Table::new();
     table
@@ -1676,21 +1649,16 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             "thrpt",
             "gr",
             "ok%",
-            "win(a/p90/max)",
-            "objGbps(p50/p90)",
-            "detail",
+            "win(a|p90|max)",
         ]);
 
     for r in &rows {
         // Use comfy-table styling (not raw ANSI) for consistent alignment.
         let mut grade_cell = Cell::new(r.grade.clone());
         if use_color {
-            grade_cell = match r.grade.as_str() {
-                "A+" | "A" => grade_cell.fg(Color::Green),
-                "B" => grade_cell.fg(Color::Yellow),
-                "C" | "D" => grade_cell.fg(Color::Red),
-                _ => grade_cell,
-            };
+            if let Some(c) = grade_to_color(&r.grade) {
+                grade_cell = grade_cell.fg(c);
+            }
         }
 
         let id = truncate(&endpoint_id(r.backend_type, &r.bucket), 18);
@@ -1714,37 +1682,13 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         }
         let _gb = (r.bytes as f64) / 1_000_000_000.0;
 
-        let errs = errs_compact(r);
-
         let win = if r.window_samples == 0 {
             "-".to_string()
         } else {
             format!(
-                "{:.1}/{:.1}/{:.1}",
+                "{:.1}|{:.1}|{:.1}",
                 r.window_gbps_mean, r.window_gbps_p90, r.window_gbps_max
             )
-        };
-
-        let obj_gbps = if r.req_samples == 0 {
-            "-".to_string()
-        } else {
-            format!("{:.2}/{:.2}", r.req_gbps_p50, r.req_gbps_p90)
-        };
-
-        let req_ms = if r.req_samples == 0 {
-            "-".to_string()
-        } else {
-            format!("{:.0}/{:.0}", r.req_ms_p50, r.req_ms_p90)
-        };
-
-        let detail = if errs == "-" {
-            if req_ms == "-" {
-                "-".to_string()
-            } else {
-                format!("reqms={}", req_ms)
-            }
-        } else {
-            errs.clone()
         };
 
         let mut type_cell = Cell::new(typ.to_string());
@@ -1760,13 +1704,10 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
 
         let mut thrpt_cell = Cell::new(format!("{:.2}", r.throughput_gbps));
         if use_color {
-            thrpt_cell = if r.throughput_gbps >= 10.0 {
-                thrpt_cell.fg(Color::Green)
-            } else if r.throughput_gbps >= 5.0 {
-                thrpt_cell.fg(Color::Yellow)
-            } else {
-                thrpt_cell.fg(Color::Red)
-            };
+            // Match throughput color to grade color.
+            if let Some(c) = grade_to_color(&r.grade) {
+                thrpt_cell = thrpt_cell.fg(c);
+            }
         }
 
         table.add_row(vec![
@@ -1781,8 +1722,6 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             grade_cell,
             ok_cell,
             Cell::new(win),
-            Cell::new(obj_gbps),
-            Cell::new(detail),
         ]);
     }
 
