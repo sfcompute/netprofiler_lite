@@ -15,7 +15,7 @@ without distributing any proprietary binaries or internal agent code.
 If you are a partner/end-user running the benchmark:
 - You do NOT need AWS or R2 credentials.
 - You do NOT need `aws` CLI.
-- You ONLY need public-readable test objects (provided by SF Compute).
+- You ONLY need public-readable test objects (provided by the benchmark maintainer).
 
 Credentialed operations are maintainer-only:
 - `--ensure` (create/check/seed objects) requires credentials.
@@ -58,7 +58,7 @@ cargo build --release
 
 Edit `netprofiler_lite.toml` and set `backends = [...]`.
 
-- S3: `"bucket:region"` (SF Compute seeds the bucket + makes objects public-read)
+- S3: `"bucket:region"` (maintainer seeds the bucket + makes objects public-read)
 - Cloudflare R2 (public): use the bucket *public origin* as `"https://pub-<id>.r2.dev"` (no creds)
 
 3) Run
@@ -94,7 +94,7 @@ There are no subcommands. Everything is a top-level flag:
 
 ## Maintainer Preseed
 
-SF Compute maintainers: see `docs/preseed.md`.
+Maintainers: see `docs/preseed.md`.
 
 ## Backends
 

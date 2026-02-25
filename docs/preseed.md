@@ -1,7 +1,7 @@
 # Preseeding Test Objects (Maintainers)
 
 Partners/end-users should not need any credentials to run download benchmarks.
-This document is for SF Compute maintainers who seed objects and make them public-readable.
+This document is for maintainers who seed objects and make them public-readable.
 
 Tip: If you want `nix run .#bench` to include S3 without hardcoding bucket names in the repo,
 tell users to export `NETPROFILER_S3_BUCKET_EUN1/EUC1/USW2/USE1` and then run the bench app.

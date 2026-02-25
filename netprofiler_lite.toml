@@ -10,7 +10,7 @@
 # - Public HTTP origin: "https://..." (CloudFront, R2 public origins like https://pub-<id>.r2.dev)
 
 backends = [
-  # S3 buckets (public-read objects). These default buckets are seeded by SF Compute.
+  # S3 buckets (public-read objects). These default buckets are seeded by the maintainer.
   # They intentionally do NOT include any AWS account identifiers.
   "sf-netprofiler-lite-public-6f9c2e-eun1:eu-north-1",
   "sf-netprofiler-lite-public-6f9c2e-euc1:eu-central-1",

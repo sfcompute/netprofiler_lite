@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Seed and (optionally) publish benchmark artifacts for netprofiler_lite.
 #
-# Run this on the SF Compute side so partners can benchmark without credentials
+# Run this on the maintainer side so partners can benchmark without credentials
 # (anonymous download mode) after objects are made public.
 
 set -euo pipefail
