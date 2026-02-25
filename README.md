@@ -89,6 +89,18 @@ Note: this repo sets `nixConfig.extra-substituters`. Nix will prompt unless you 
 `--accept-flake-config` (as shown) or set `accept-flake-config = true` in your Nix config
 (`~/.config/nix/nix.conf` or `/etc/nix/nix.conf`).
 
+Non-Nix (Rust toolchain)
+
+```bash
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+source "$HOME/.cargo/env"
+
+cargo build --release
+./target/release/netprofiler_lite
+```
+
+More details: `docs/usage.md`.
+
 ## Releases
 
 Prebuilt binaries are published for:
