@@ -16,6 +16,10 @@ Notes on defaults:
 This tool is designed to be shared so others can reproduce and compare object-storage throughput
 results without distributing proprietary binaries.
 
+Roadmap note:
+- This is intended to evolve into a benchmark that can saturate an entire cluster (not just a
+  single host), while keeping the same "no-credentials for end-users" distribution model.
+
 ## No Credentials Required (Partner Runs)
 
 If you are an end-user running the benchmark:
