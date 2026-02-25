@@ -25,14 +25,22 @@ test -n "$version" || { echo "failed to detect latest version"; exit 1; }
 
 os="$(uname -s)"; arch="$(uname -m)"
 case "${os}-${arch}" in
-  Linux-x86_64) asset="netprofiler_lite-${version}-x86_64-unknown-linux-gnu.tar.gz" ;;
+  Linux-x86_64) asset="netprofiler_lite-${version}-x86_64-unknown-linux-musl.tar.gz" ;;
   Darwin-x86_64) asset="netprofiler_lite-${version}-x86_64-apple-darwin.tar.gz" ;;
   Darwin-arm64) asset="netprofiler_lite-${version}-aarch64-apple-darwin.tar.gz" ;;
   *) echo "unsupported: ${os}-${arch}"; exit 1 ;;
 esac
 
 base="https://github.com/kennethdsheridan/netprofiler_lite/releases/latest/download"
-curl -fsSL -O "${base}/${asset}" -O "${base}/${asset}.sha256"
+curl -fsSL -O "${base}/${asset}" -O "${base}/${asset}.sha256" || {
+  # Backward-compat: older releases used a glibc-linked linux artifact name.
+  if [ "${os}-${arch}" = "Linux-x86_64" ]; then
+    asset="netprofiler_lite-${version}-x86_64-unknown-linux-gnu.tar.gz"
+    curl -fsSL -O "${base}/${asset}" -O "${base}/${asset}.sha256"
+  else
+    exit 1
+  fi
+}
 shasum -a 256 -c "${asset}.sha256" 2>/dev/null || sha256sum -c "${asset}.sha256"
 tar -xzf "${asset}"
 

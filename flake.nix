@@ -41,6 +41,20 @@
           nativeBuildInputs = [ pkgs.pkg-config ];
         };
 
+        # Static Linux package
+        # - `nix build .#linux-static` produces a statically linked musl binary
+        packages.linux-static =
+          if pkgs.stdenv.isLinux then
+            pkgs.pkgsStatic.rustPlatform.buildRustPackage {
+              pname = "netprofiler_lite";
+              version = pkgVersion;
+              src = ./.;
+              cargoLock.lockFile = ./Cargo.lock;
+              doCheck = false;
+            }
+          else
+            pkgs.writeText "linux-static-unavailable" "linux-static is only available on Linux";
+
         # Apps
         # - `nix run .` runs the binary
         # - `nix run .#bench` runs a default benchmark command

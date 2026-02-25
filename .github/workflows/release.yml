@@ -18,18 +18,22 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v12
 
-      - name: Nix build
-        run: nix build --accept-flake-config
+      - name: Nix build (static musl)
+        run: nix build --accept-flake-config .#linux-static
 
       - name: Package
         shell: bash
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          name="netprofiler_lite-${version}-x86_64-unknown-linux-gnu"
+          name="netprofiler_lite-${version}-x86_64-unknown-linux-musl"
           alias="netprofiler_lite-linux-x86_64"
           mkdir -p dist
           cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
+
+          file dist/netprofiler_lite
+          file dist/netprofiler_lite | grep -qi "statically linked"
+
           tar -C dist -czf "${name}.tar.gz" netprofiler_lite
           sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
 

@@ -9,6 +9,8 @@ Use the Quickstart snippet in `README.md` (downloads from `releases/latest`).
 Releases are created by pushing a `v*` git tag. GitHub Actions builds binaries via Nix and uploads
 tarballs + sha256 sums.
 
+Linux releases are built as statically linked musl binaries.
+
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
