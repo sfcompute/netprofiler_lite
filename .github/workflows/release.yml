@@ -46,37 +46,3 @@ jobs:
           files: |
             netprofiler_lite-*.tar.gz
             netprofiler_lite-*.tar.gz.sha256
-
-  build-macos-arm64:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v12
-
-      - name: Nix build
-        run: nix build --accept-flake-config
-
-      - name: Package
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          name="netprofiler_lite-${version}-aarch64-apple-darwin"
-          alias="netprofiler_lite-macos-arm64"
-          mkdir -p dist
-          cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
-          tar -C dist -czf "${name}.tar.gz" netprofiler_lite
-          shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
-
-          cp "${name}.tar.gz" "${alias}.tar.gz"
-          cp "${name}.tar.gz.sha256" "${alias}.tar.gz.sha256"
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            netprofiler_lite-*.tar.gz
-            netprofiler_lite-*.tar.gz.sha256

@@ -11,8 +11,6 @@ tarballs + sha256 sums.
 
 Linux releases are built as statically linked musl binaries.
 
-macOS releases are published for arm64.
-
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
