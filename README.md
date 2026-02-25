@@ -10,8 +10,16 @@ Goals:
 This is intended to be shared with providers (e.g. NDG) to reproduce observed results
 without distributing any proprietary binaries or internal agent code.
 
-Key point for distribution: partners should only need public-readable objects (no AWS/R2
-credentials) to run download benchmarks.
+## No Credentials Required (Partner Runs)
+
+If you are a partner/end-user running the benchmark:
+- You do NOT need AWS or R2 credentials.
+- You do NOT need `aws` CLI.
+- You ONLY need public-readable test objects (provided by SF Compute).
+
+Credentialed operations are maintainer-only:
+- `--ensure` (create/check/seed objects) requires credentials.
+- Upload tests require credentials.
 
 ## Partner quickstart (recommended)
 
@@ -33,8 +41,8 @@ cargo build --release
 
 Edit `netprofiler_lite.toml` and set `backends = [...]`.
 
-- S3: `"bucket:region"` (objects must be public-read)
-- Cloudflare R2 (public): use the bucket *public origin* as `"https://pub-<id>.r2.dev"`
+- S3: `"bucket:region"` (SF Compute seeds the bucket + makes objects public-read)
+- Cloudflare R2 (public): use the bucket *public origin* as `"https://pub-<id>.r2.dev"` (no creds)
 
 3) Run
 
@@ -106,6 +114,10 @@ Comma-separated specs:
   - Use this for CloudFront (`https://d111111abcdef8.cloudfront.net`) or Cloudflare public R2 (`https://pub-xxxx.r2.dev`).
 
 ## Credentials
+
+Partners/end-users: you can skip this section.
+
+For partner download runs, do NOT set any credentials; just run with public backends.
 
 S3 (AWS):
 - Prefers env vars:
