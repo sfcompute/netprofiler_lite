@@ -43,14 +43,25 @@
 
         # Static Linux package
         # - `nix build .#linux-static` produces a statically linked musl binary
+        # - uses the same Rust toolchain as the normal build (fenix stable)
         packages.linux-static =
           if pkgs.stdenv.isLinux then
-            pkgs.pkgsStatic.rustPlatform.buildRustPackage {
+            let
+              toolchainMusl = toolchain.withTargets [ "x86_64-unknown-linux-musl" ];
+              rustPlatformMusl = pkgs.makeRustPlatform {
+                cargo = toolchainMusl.cargo;
+                rustc = toolchainMusl.rustc;
+              };
+            in
+            rustPlatformMusl.buildRustPackage {
               pname = "netprofiler_lite";
               version = pkgVersion;
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
               doCheck = false;
+
+              stdenv = pkgs.pkgsStatic.stdenv;
+              CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
             }
           else
             pkgs.writeText "linux-static-unavailable" "linux-static is only available on Linux";
