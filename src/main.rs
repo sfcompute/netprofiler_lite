@@ -308,18 +308,24 @@ fn merge_compare(
 ) -> Result<(String, CompareArgs, RunConfig)> {
     let file = file.unwrap_or_default();
 
+    const DEFAULT_BACKENDS: &str = "sf-netprofiler-lite-public-6f9c2e-eun1:eu-north-1,sf-netprofiler-lite-public-6f9c2e-euc1:eu-central-1,sf-netprofiler-lite-public-6f9c2e-usw2:us-west-2,sf-netprofiler-lite-public-6f9c2e-use1:us-east-1,https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev";
+
     let backends = if let Some(b) = args.backends.clone() {
         b
     } else if let Some(list) = file.backends.clone() {
-        list.into_iter()
+        let csv = list
+            .into_iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
-            .join(",")
+            .join(",");
+        if csv.trim().is_empty() {
+            DEFAULT_BACKENDS.to_string()
+        } else {
+            csv
+        }
     } else {
-        return Err(anyhow!(
-            "no backends provided. Set 'backends = [..]' in netprofiler_lite.toml or pass --backends"
-        ));
+        DEFAULT_BACKENDS.to_string()
     };
 
     let direction = args
