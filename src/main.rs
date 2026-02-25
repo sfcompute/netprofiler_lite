@@ -18,8 +18,90 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
+use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
 
 type HmacSha256 = Hmac<Sha256>;
+
+fn init_tracing() {
+    // Enable via `RUST_LOG=info|debug`.
+    // Keep default fairly quiet for partner distribution.
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_level(true)
+        .with_ansi(std::io::stderr().is_terminal())
+        .try_init();
+}
+
+fn validate_run_config(cfg: &RunConfig) -> Result<()> {
+    if cfg.concurrency == 0 {
+        return Err(anyhow!("concurrency must be >= 1"));
+    }
+    if cfg.duration_secs == 0 {
+        return Err(anyhow!("duration must be >= 1"));
+    }
+    if cfg.file_count == 0 {
+        return Err(anyhow!("file_count must be >= 1"));
+    }
+    if cfg.file_count > 10_000 {
+        return Err(anyhow!("file_count too large (use <= 10000)"));
+    }
+    Ok(())
+}
+
+fn build_http_client() -> Result<HttpClient> {
+    HttpClient::builder()
+        .http1_only()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(4096)
+        .tcp_nodelay(true)
+        .build()
+        .context("build http client")
+}
+
+fn build_urls_for_backend(b: &Backend, cfg: &RunConfig) -> Result<Vec<String>> {
+    let mut urls = Vec::with_capacity(cfg.file_count);
+    if b.creds.is_some() {
+        let expires = cfg.duration_secs + 900;
+        let now = Utc::now();
+        for i in 0..cfg.file_count {
+            let key = format!("{}.{}", cfg.prefix, i);
+            urls.push(presign_get_url(b, &key, expires, now)?);
+        }
+    } else {
+        warn!(backend = %b.spec.name, "no credentials; using anonymous public URLs");
+        eprintln!(
+            "[{}] No credentials found; using anonymous public URLs. Objects must be public-read.",
+            b.spec.name
+        );
+        for i in 0..cfg.file_count {
+            let key = format!("{}.{}", cfg.prefix, i);
+            urls.push(object_url(b, &key, None));
+        }
+    }
+    Ok(urls)
+}
+
+async fn preflight_get(
+    http: &HttpClient,
+    backend_name: &str,
+    prefix: &str,
+    url: &str,
+) -> Result<()> {
+    let resp =
+        http.get(url).send().await.with_context(|| {
+            format!("preflight GET request failed for {backend_name} (url={url})")
+        })?;
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "preflight GET failed for {backend_name} (HTTP {status}): expected objects like {prefix}.0"
+    ))
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "netprofiler_lite")]
@@ -294,6 +376,7 @@ struct BackendRunResult {
     timestamp: DateTime<Utc>,
     backend_type: BackendType,
     name: String,
+    target_host: String,
     bucket: String,
     region_or_account: String,
     direction: Direction,
@@ -364,6 +447,13 @@ struct CompareResult {
     timestamp: DateTime<Utc>,
     config: RunConfig,
     results: Vec<BackendRunResult>,
+}
+
+fn target_host(b: &Backend) -> String {
+    match b.spec.backend_type {
+        BackendType::Http => url_host(&b.spec.bucket),
+        BackendType::S3 | BackendType::R2 => backend_host(b),
+    }
 }
 
 fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
@@ -1572,6 +1662,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
     println!("Legend:");
     println!("- thrpt: total goodput in Gbps (successful bytes only)");
     println!("- win(a|p90|max): 1s window goodput samples in Gbps (stream-progress bytes)");
+    println!("- host: hostname contacted for the backend");
     println!();
 
     if let Some(p) = report_path {
@@ -1618,6 +1709,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             "type",
             "endpoint",
             "region",
+            "host",
             "thrpt",
             "gr",
             "ok%",
@@ -1640,6 +1732,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         } else {
             r.region_or_account.clone()
         };
+        let host = truncate(&r.target_host, 34);
         let rate = fmt_rate(r.successes, r.transfers);
         let mut ok_cell = Cell::new(rate.clone());
         if use_color {
@@ -1690,6 +1783,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             type_cell,
             Cell::new(id),
             Cell::new(region),
+            Cell::new(host),
             thrpt_cell,
             grade_cell,
             ok_cell,
@@ -1778,13 +1872,14 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
 }
 
 fn print_csv(results: &CompareResult) {
-    println!("timestamp,backend_type,name,bucket,region_or_account,direction,concurrency,duration_s,file_count,file_size_mb,bytes,transfers,successes,network_errors,http_non_success,http_4xx,http_429,http_5xx,req_samples,req_gbps_mean,req_gbps_p50,req_gbps_p90,req_gbps_min,req_gbps_max,req_ms_mean,req_ms_p50,req_ms_p90,req_ms_min,req_ms_max,throughput_gbps,grade");
+    println!("timestamp,backend_type,name,target_host,bucket,region_or_account,direction,concurrency,duration_s,file_count,file_size_mb,bytes,transfers,successes,network_errors,http_non_success,http_4xx,http_429,http_5xx,req_samples,req_gbps_mean,req_gbps_p50,req_gbps_p90,req_gbps_min,req_gbps_max,req_ms_mean,req_ms_p50,req_ms_p90,req_ms_min,req_ms_max,throughput_gbps,grade");
     for r in &results.results {
         println!(
-            "{},{:?},{},{},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{}",
+            "{},{:?},{},{},{},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{}",
             r.timestamp.to_rfc3339(),
             r.backend_type,
             r.name,
+            r.target_host,
             r.bucket,
             r.region_or_account,
             match r.direction {
@@ -1833,6 +1928,8 @@ fn write_toml_report(results: &CompareResult, path: &Path) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_tracing();
+
     let cli = Cli::parse();
 
     let file_cfg = if cli.no_config {
@@ -1843,35 +1940,19 @@ async fn main() -> Result<()> {
         load_file_config(&path, required)?
     };
 
-    let (backends_str, args, cfg) = merge_compare(cli.compare, file_cfg)?;
-    if cfg.concurrency == 0 {
-        return Err(anyhow!("concurrency must be >= 1"));
-    }
-    if cfg.duration_secs == 0 {
-        return Err(anyhow!("duration must be >= 1"));
-    }
-    if cfg.file_count == 0 {
-        return Err(anyhow!("file_count must be >= 1"));
-    }
-    if cfg.file_count > 10_000 {
-        return Err(anyhow!("file_count too large (use <= 10000)"));
-    }
+    let (backends_str, args, cfg) = merge_compare(cli.compare, file_cfg).context("merge config")?;
+    validate_run_config(&cfg)?;
 
-    let specs = parse_backends(&backends_str)?;
+    let specs = parse_backends(&backends_str).context("parse backends")?;
     let direction = args.direction.unwrap_or(DirectionArg::Download);
     let output = args.output.unwrap_or(OutputArg::Human);
 
-    let http = HttpClient::builder()
-        .http1_only()
-        .pool_idle_timeout(Duration::from_secs(90))
-        .pool_max_idle_per_host(4096)
-        .tcp_nodelay(true)
-        .build()
-        .context("build http client")?;
+    info!(cmd = %backends_str, direction = ?direction, output = ?output, "netprofiler_lite start");
+    let http = build_http_client()?;
 
     let mut backends = Vec::with_capacity(specs.len());
     for s in specs {
-        backends.push(make_backend(s)?);
+        backends.push(make_backend(s).context("construct backend")?);
     }
 
     if matches!(direction, DirectionArg::Upload | DirectionArg::Both) {
@@ -1887,57 +1968,33 @@ async fn main() -> Result<()> {
 
     if args.ensure {
         for b in &backends {
-            ensure_bucket_and_objects(&http, b, &cfg).await?;
+            ensure_bucket_and_objects(&http, b, &cfg)
+                .await
+                .with_context(|| format!("ensure for backend {}", b.spec.name))?;
         }
     }
 
     let mut all_results = Vec::new();
     for b in &backends {
         if matches!(direction, DirectionArg::Download | DirectionArg::Both) {
-            let mut urls = Vec::with_capacity(cfg.file_count);
-            if b.creds.is_some() {
-                let expires = cfg.duration_secs + 900;
-                let now = Utc::now();
-                for i in 0..cfg.file_count {
-                    let key = format!("{}.{}", cfg.prefix, i);
-                    urls.push(presign_get_url(b, &key, expires, now)?);
-                }
-            } else {
-                eprintln!(
-                    "[{}] No credentials found; using anonymous public URLs. Objects must be public-read.",
-                    b.spec.name
-                );
-                for i in 0..cfg.file_count {
-                    let key = format!("{}.{}", cfg.prefix, i);
-                    urls.push(object_url(b, &key, None));
-                }
-            }
+            let urls = build_urls_for_backend(b, &cfg)
+                .with_context(|| format!("build urls for {}", b.spec.name))?;
 
             if let Some(u) = urls.first() {
-                let resp = http.get(u).send().await;
-                let resp = resp.with_context(|| {
-                    format!(
-                        "preflight GET request failed for {} (url={})",
-                        b.spec.name, u
-                    )
-                })?;
-                let status = resp.status();
-                if !status.is_success() {
-                    return Err(anyhow!(
-                        "preflight GET failed for {} (HTTP {}): expected objects like {}.0",
-                        b.spec.name,
-                        status,
-                        cfg.prefix
-                    ));
-                }
+                preflight_get(&http, &b.spec.name, &cfg.prefix, u)
+                    .await
+                    .with_context(|| format!("preflight for backend {}", b.spec.name))?;
             }
 
             let started = Utc::now();
-            let o = run_download(&http, Arc::new(urls), &cfg, &b.spec.name.to_string()).await?;
+            let o = run_download(&http, Arc::new(urls), &cfg, &b.spec.name.to_string())
+                .await
+                .with_context(|| format!("download run failed for {}", b.spec.name))?;
             all_results.push(BackendRunResult {
                 timestamp: started,
                 backend_type: b.spec.backend_type,
                 name: b.spec.name.clone(),
+                target_host: target_host(b),
                 bucket: b.spec.bucket.clone(),
                 region_or_account: b.spec.region_or_account.clone(),
                 direction: Direction::Download,
@@ -1975,11 +2032,14 @@ async fn main() -> Result<()> {
 
         if matches!(direction, DirectionArg::Upload | DirectionArg::Both) {
             let started = Utc::now();
-            let o = run_upload(&http, b, &cfg).await?;
+            let o = run_upload(&http, b, &cfg)
+                .await
+                .with_context(|| format!("upload run failed for {}", b.spec.name))?;
             all_results.push(BackendRunResult {
                 timestamp: started,
                 backend_type: b.spec.backend_type,
                 name: b.spec.name.clone(),
+                target_host: target_host(b),
                 bucket: b.spec.bucket.clone(),
                 region_or_account: b.spec.region_or_account.clone(),
                 direction: Direction::Upload,
