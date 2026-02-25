@@ -43,6 +43,10 @@ If you are running from GitHub (no checkout required):
 nix run --accept-flake-config github:kennethdsheridan/netprofiler_lite#bench
 ```
 
+Note: this repo sets `nixConfig.extra-substituters`. Nix will prompt unless you pass
+`--accept-flake-config` (as shown) or set `accept-flake-config = true` in your Nix config
+(`~/.config/nix/nix.conf` or `/etc/nix/nix.conf`).
+
 2) Or build with Rust toolchain
 
 ```bash

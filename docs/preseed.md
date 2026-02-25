@@ -43,6 +43,10 @@ Or as a flake app:
 nix run .#seed --accept-flake-config
 ```
 
+Note: this repo sets `nixConfig.extra-substituters`. Nix will prompt unless you pass
+`--accept-flake-config` (as shown) or set `accept-flake-config = true` in your Nix config
+(`~/.config/nix/nix.conf` or `/etc/nix/nix.conf`).
+
 ## Seeding Speed Knobs
 
 - `SEED_CONCURRENCY=16` (default): parallel uploads per bucket/region

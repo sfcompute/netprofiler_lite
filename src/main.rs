@@ -1715,7 +1715,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
     println!("Legend:");
     println!("- thrpt: total goodput in Gbps (successful bytes only)");
     println!("- win(a|p90|max): 1s window goodput samples in Gbps (stream-progress bytes)");
-    println!("- host: hostname contacted for the backend");
+    println!("- target_host: hostname contacted for the backend (Host/SNI)");
     println!();
 
     if let Some(p) = report_path {
@@ -1762,7 +1762,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             "type",
             "endpoint",
             "region",
-            "host",
+            "target_host",
             "thrpt",
             "gr",
             "ok%",
@@ -1847,33 +1847,45 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
     println!("{table}");
 
     for dir in [Direction::Download, Direction::Upload] {
-        let mut tps: Vec<f64> = results
+        let dir_results: Vec<&BackendRunResult> = results
             .results
             .iter()
             .filter(|r| r.direction == dir)
-            .map(|r| r.throughput_gbps)
             .collect();
-        if tps.is_empty() {
+        if dir_results.is_empty() {
             continue;
         }
 
-        let n = tps.len() as f64;
-        let sum: f64 = tps.iter().sum();
-        let avg = sum / n;
-        let mut sorted = tps.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let min = *sorted.first().unwrap_or(&0.0);
-        let max = *sorted.last().unwrap_or(&0.0);
-        let p90v = p90(&mut tps);
-
-        let (ok_sum, tot_sum) = results
-            .results
+        let mut tps_nonzero: Vec<f64> = dir_results
             .iter()
-            .filter(|r| r.direction == dir)
-            .fold((0u64, 0u64), |(ok, tot), r| {
-                (ok + r.successes, tot + r.transfers)
-            });
-        let rate = fmt_rate(ok_sum, tot_sum);
+            .filter(|r| r.successes > 0 && r.bytes > 0)
+            .map(|r| r.throughput_gbps)
+            .collect();
+        let zero_ok = dir_results
+            .iter()
+            .filter(|r| r.successes == 0 || r.bytes == 0)
+            .count();
+        let rate_limited = dir_results.iter().filter(|r| r.http_429 > 0).count();
+
+        let (ok_sum, tot_sum) = dir_results.iter().fold((0u64, 0u64), |(ok, tot), r| {
+            (ok + r.successes, tot + r.transfers)
+        });
+        let ok_rate = fmt_rate(ok_sum, tot_sum);
+
+        let (avg, p90v, min, max) = if tps_nonzero.is_empty() {
+            (0.0, 0.0, 0.0, 0.0)
+        } else {
+            let n = tps_nonzero.len() as f64;
+            let sum: f64 = tps_nonzero.iter().sum();
+            let avg = sum / n;
+            let mut sorted = tps_nonzero.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let min = *sorted.first().unwrap_or(&0.0);
+            let max = *sorted.last().unwrap_or(&0.0);
+            let p90v = p90(&mut tps_nonzero);
+            (avg, p90v, min, max)
+        };
+
         let g = grade(avg);
         let g = if !no_color && std::io::stdout().is_terminal() {
             ansi(grade_color(g), g)
@@ -1882,19 +1894,22 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         };
 
         println!(
-            "\n{:>8} stats: avg={:.2}Gbps {}  p90={:.2}  min={:.2}  max={:.2}  ok={}/{} ({})",
+            "\n{:>8} stats: endpoints={} ok_rate={} ({}/{}) rl_endpoints={} zero_ok={} | thrpt(avg/p90/min/max)={:.2}/{:.2}/{:.2}/{:.2}Gbps {}",
             match dir {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
             },
+            dir_results.len(),
+            ok_rate,
+            fmt_u64_compact(ok_sum),
+            fmt_u64_compact(tot_sum),
+            rate_limited,
+            zero_ok,
             avg,
-            g,
             p90v,
             min,
             max,
-            fmt_u64_compact(ok_sum),
-            fmt_u64_compact(tot_sum),
-            rate
+            g
         );
     }
 
