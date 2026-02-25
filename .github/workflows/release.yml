@@ -32,7 +32,7 @@ jobs:
           cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
 
           file dist/netprofiler_lite
-          file dist/netprofiler_lite | grep -qi "statically linked"
+          file dist/netprofiler_lite | grep -Eqi "statically linked|static-pie linked"
 
           tar -C dist -czf "${name}.tar.gz" netprofiler_lite
           sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
