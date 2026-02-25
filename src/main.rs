@@ -5,6 +5,7 @@ use clap::{ArgAction, Parser, ValueEnum};
 use comfy_table::{presets::ASCII_MARKDOWN, Cell, Color, ContentArrangement, Table};
 use futures::StreamExt;
 use hmac::{Hmac, Mac};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use reqwest::Client as HttpClient;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,10 @@ use tracing_subscriber::EnvFilter;
 type HmacSha256 = Hmac<Sha256>;
 
 fn init_tracing() {
+    // Only enable logs when user asks for them.
+    if std::env::var_os("RUST_LOG").is_none() {
+        return;
+    }
     // Enable via `RUST_LOG=info|debug`.
     // Keep default fairly quiet for partner distribution.
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
@@ -31,8 +36,24 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_target(false)
         .with_level(true)
+        .without_time()
         .with_ansi(std::io::stderr().is_terminal())
         .try_init();
+}
+
+fn fmt_gb(bytes: u64) -> String {
+    format!("{:.1}GB", (bytes as f64) / 1_000_000_000.0)
+}
+
+fn mk_progress_bar(prefix: &str, total_secs: u64) -> ProgressBar {
+    let pb = ProgressBar::with_draw_target(Some(total_secs), ProgressDrawTarget::stderr());
+    let style =
+        ProgressStyle::with_template("{prefix:.bold} {bar:40.cyan/blue} {pos:>2}/{len:>2}s {msg}")
+            .unwrap()
+            .progress_chars("=>-");
+    pb.set_style(style);
+    pb.set_prefix(prefix.to_string());
+    pb
 }
 
 fn validate_run_config(cfg: &RunConfig) -> Result<()> {
@@ -72,10 +93,6 @@ fn build_urls_for_backend(b: &Backend, cfg: &RunConfig) -> Result<Vec<String>> {
         }
     } else {
         warn!(backend = %b.spec.name, "no credentials; using anonymous public URLs");
-        eprintln!(
-            "[{}] No credentials found; using anonymous public URLs. Objects must be public-read.",
-            b.spec.name
-        );
         for i in 0..cfg.file_count {
             let key = format!("{}.{}", cfg.prefix, i);
             urls.push(object_url(b, &key, None));
@@ -1055,7 +1072,9 @@ async fn run_download(
     urls: Arc<Vec<String>>,
     cfg: &RunConfig,
     label: &str,
+    host: &str,
 ) -> Result<RunOutcome> {
+    info!(backend = %label, host = %host, "download start");
     let sem = Arc::new(Semaphore::new(cfg.concurrency));
     let idx = Arc::new(AtomicUsize::new(0));
     // bytes_ok: only counts fully successful requests
@@ -1107,25 +1126,49 @@ async fn run_download(
             }
         })
     };
-    let progress_task = if cfg.progress {
+    let progress_task = if cfg.progress && std::io::stderr().is_terminal() {
         let stop = stop.clone();
         let bytes_progress = bytes_progress.clone();
         let transfers = transfers.clone();
         let successes = successes.clone();
-        let label = label.to_string();
         let interval = Duration::from_millis(cfg.progress_interval_ms.max(200));
-        let duration_secs = cfg.duration_secs;
+        let total = cfg.duration_secs;
+        let pb_prefix = format!("{label} ({host})");
+        let pb = mk_progress_bar(&pb_prefix, total);
         Some(tokio::spawn(async move {
-            while !stop.load(Ordering::Relaxed) {
+            let mut last_b = 0u64;
+            let mut last_t = Instant::now();
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    pb.finish_and_clear();
+                    break;
+                }
+
                 let elapsed = start.elapsed().as_secs_f64().max(0.001);
+                pb.set_position(start.elapsed().as_secs().min(total));
+
                 let b = bytes_progress.load(Ordering::Relaxed);
                 let t = transfers.load(Ordering::Relaxed);
                 let ok = successes.load(Ordering::Relaxed);
-                let gbps = (b as f64 * 8.0) / elapsed / 1_000_000_000.0;
-                let left = duration_secs.saturating_sub(start.elapsed().as_secs());
-                eprintln!(
-                    "[{label}] {elapsed:.0}s elapsed, {left}s left | xfers={t} ok={ok} bytes={b} | {gbps:.3} Gbps"
-                );
+
+                let now = Instant::now();
+                let dt = now.duration_since(last_t).as_secs_f64().max(0.001);
+                let db = b.saturating_sub(last_b);
+                last_b = b;
+                last_t = now;
+
+                let inst_gbps = (db as f64 * 8.0) / dt / 1_000_000_000.0;
+                let avg_gbps = (b as f64 * 8.0) / elapsed / 1_000_000_000.0;
+                let ok_pct = if t == 0 {
+                    0.0
+                } else {
+                    (ok as f64) * 100.0 / (t as f64)
+                };
+
+                pb.set_message(format!(
+                    "avg={avg_gbps:.2}Gbps inst={inst_gbps:.2} ok={ok}/{t} ({ok_pct:.1}%) bytes={}",
+                    fmt_gb(b)
+                ));
                 tokio::time::sleep(interval).await;
             }
         }))
@@ -1239,6 +1282,16 @@ async fn run_download(
     let total_http_429 = http_429.load(Ordering::Relaxed);
     let total_http_5xx = http_5xx.load(Ordering::Relaxed);
     let gbps = (total_bytes as f64 * 8.0) / elapsed / 1_000_000_000.0;
+
+    info!(
+        backend = %label,
+        host = %host,
+        bytes_ok = total_bytes,
+        requests_ok = total_success,
+        requests_total = total_transfers,
+        thrpt_gbps = gbps,
+        "download complete"
+    );
 
     let window_gbps = window_gbps_samples
         .lock()
@@ -1987,7 +2040,8 @@ async fn main() -> Result<()> {
             }
 
             let started = Utc::now();
-            let o = run_download(&http, Arc::new(urls), &cfg, &b.spec.name.to_string())
+            let host = target_host(b);
+            let o = run_download(&http, Arc::new(urls), &cfg, &b.spec.name, &host)
                 .await
                 .with_context(|| format!("download run failed for {}", b.spec.name))?;
             all_results.push(BackendRunResult {
