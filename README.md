@@ -75,7 +75,7 @@ Copy/paste run command (same defaults as `.#bench`):
 
 ```bash
 ./target/release/netprofiler_lite \
-  --backends "sf-netprofiler-lite-903616605317-eun1:eu-north-1,sf-netprofiler-lite-903616605317-euc1:eu-central-1,sf-netprofiler-lite-903616605317-usw2:us-west-2,sf-netprofiler-lite-903616605317-use1:us-east-1,https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev" \
+  --backends "https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev" \
   --direction download \
   --concurrency 256 \
   --duration 15 \
@@ -83,6 +83,9 @@ Copy/paste run command (same defaults as `.#bench`):
   --file-count 100 \
   --file-size-mb 8
 ```
+
+To include S3 in the run, ask the maintainer for the public S3 bucket names and add them as
+`bucket:region` entries.
 
 ## CLI shape
 

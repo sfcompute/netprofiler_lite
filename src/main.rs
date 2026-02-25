@@ -107,10 +107,11 @@ async fn preflight_get(
     prefix: &str,
     url: &str,
 ) -> Result<()> {
-    let resp =
-        http.get(url).send().await.with_context(|| {
-            format!("preflight GET request failed for {backend_name} (url={url})")
-        })?;
+    let resp = http
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("preflight GET request failed for {backend_name}"))?;
     let status = resp.status();
     if status.is_success() {
         return Ok(());
@@ -393,6 +394,7 @@ struct BackendRunResult {
     timestamp: DateTime<Utc>,
     backend_type: BackendType,
     name: String,
+    endpoint: String,
     target_host: String,
     bucket: String,
     region_or_account: String,
@@ -469,7 +471,24 @@ struct CompareResult {
 fn target_host(b: &Backend) -> String {
     match b.spec.backend_type {
         BackendType::Http => url_host(&b.spec.bucket),
-        BackendType::S3 | BackendType::R2 => backend_host(b),
+        BackendType::S3 => s3_service_host(&b.spec.region_or_account),
+        BackendType::R2 => backend_host(b),
+    }
+}
+
+fn s3_service_host(region: &str) -> String {
+    if region == "us-east-1" {
+        "s3.amazonaws.com".to_string()
+    } else {
+        format!("s3.{region}.amazonaws.com")
+    }
+}
+
+fn report_bucket_value(b: &Backend) -> String {
+    // Avoid leaking internal bucket naming (e.g. embedding AWS account ids).
+    match b.spec.backend_type {
+        BackendType::S3 => "-".to_string(),
+        BackendType::R2 | BackendType::Http => b.spec.bucket.clone(),
     }
 }
 
@@ -530,7 +549,8 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
         let region = parts[1].to_string();
         out.push(BackendSpec {
             backend_type: BackendType::S3,
-            name: format!("s3-{bucket}-{region}"),
+            // Keep names stable and avoid embedding sensitive identifiers.
+            name: format!("s3-{region}"),
             bucket,
             region_or_account: region,
         });
@@ -1778,7 +1798,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             }
         }
 
-        let id = truncate(&endpoint_id(r.backend_type, &r.bucket), 18);
+        let id = truncate(&r.endpoint, 18);
         let typ = backend_label(r.backend_type, &r.bucket);
         let region = if r.region_or_account.is_empty() {
             "-".to_string()
@@ -1925,14 +1945,13 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             });
         if let Some(b) = best {
             println!(
-                "\nRecommendation ({}): {} ({}/{}) @ {:.3} Gbps",
+                "\nRecommendation ({}): {} ({}) @ {:.3} Gbps",
                 match dir {
                     Direction::Download => "download",
                     Direction::Upload => "upload",
                 },
-                b.name,
-                b.bucket,
-                b.region_or_account,
+                b.endpoint,
+                b.target_host,
                 b.throughput_gbps
             );
         }
@@ -2063,8 +2082,9 @@ async fn main() -> Result<()> {
                 timestamp: started,
                 backend_type: b.spec.backend_type,
                 name: b.spec.name.clone(),
+                endpoint: endpoint_id(b.spec.backend_type, &b.spec.bucket),
                 target_host: target_host(b),
-                bucket: b.spec.bucket.clone(),
+                bucket: report_bucket_value(b),
                 region_or_account: b.spec.region_or_account.clone(),
                 direction: Direction::Download,
                 concurrency: cfg.concurrency,
@@ -2108,8 +2128,9 @@ async fn main() -> Result<()> {
                 timestamp: started,
                 backend_type: b.spec.backend_type,
                 name: b.spec.name.clone(),
+                endpoint: endpoint_id(b.spec.backend_type, &b.spec.bucket),
                 target_host: target_host(b),
-                bucket: b.spec.bucket.clone(),
+                bucket: report_bucket_value(b),
                 region_or_account: b.spec.region_or_account.clone(),
                 direction: Direction::Upload,
                 concurrency: cfg.concurrency,
