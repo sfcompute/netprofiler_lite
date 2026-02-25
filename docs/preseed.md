@@ -51,6 +51,23 @@ nix develop --accept-flake-config -c doppler run --project cloudflare --config p
   bash ./scripts/seed_artifacts.sh
 ```
 
+Or run the flake app (recommended for maintainers):
+
+```bash
+nix develop --accept-flake-config -c doppler run --project cloudflare --config prd -- \
+  nix run --accept-flake-config .#seed
+```
+
+Expected output highlights:
+- The seeder will load AWS creds from `~/.aws/credentials` (and will auto-select the only profile
+  if `default` is missing keys).
+- It will print the buckets it is using/creating, e.g.:
+  - `BUCKET_EUN1=sf-netprofiler-lite-public-6f9c2e-eun1`
+  - `BUCKET_EUC1=sf-netprofiler-lite-public-6f9c2e-euc1`
+  - `BUCKET_USW2=sf-netprofiler-lite-public-6f9c2e-usw2`
+  - `BUCKET_USE1=sf-netprofiler-lite-public-6f9c2e-use1`
+- It will create missing buckets and upload `${PREFIX}.0..${PREFIX}.(FILE_COUNT-1)`.
+
 Or as a flake app:
 
 ```bash
