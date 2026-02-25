@@ -4,6 +4,25 @@ This repo uses Nix flakes.
 
 ## Install Nix (Determinate Systems, non-interactive)
 
+Install + run `netprofiler_lite` in one copy/paste (no repo clone):
+
+```bash
+command -v nix >/dev/null 2>&1 || {
+  sudo curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+    | sh -s -- install --no-confirm
+}
+
+if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+elif [ -e "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
+  . "$HOME/.nix-profile/etc/profile.d/nix.sh"
+fi
+
+nix run --accept-flake-config github:kennethdsheridan/netprofiler_lite#bench
+```
+
+Install only:
+
 ```bash
 sudo curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
   | sh -s -- install --no-confirm
