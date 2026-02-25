@@ -57,6 +57,14 @@ Note: this repo sets `nixConfig.extra-substituters`. Nix will prompt unless you 
 `--accept-flake-config` (as shown) or set `accept-flake-config = true` in your Nix config
 (`~/.config/nix/nix.conf` or `/etc/nix/nix.conf`).
 
+## Releases
+
+Prebuilt binaries are published for:
+- Linux x86_64
+- macOS (x86_64 and arm64)
+
+Create a release by pushing a tag like `v0.1.0`.
+
 2) Or build with Rust toolchain
 
 ```bash
