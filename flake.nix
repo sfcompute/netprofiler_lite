@@ -53,7 +53,7 @@
               toolchainMusl = fenix.packages.${system}.combine [
                 stable.cargo
                 stable.rustc
-                fenix.packages.${system}.targets.x86_64-unknown-linux-musl.latest.rust-std
+                fenix.packages.${system}.targets.x86_64-unknown-linux-musl.stable.rust-std
               ];
               rustPlatformMusl = pkgsStatic.makeRustPlatform {
                 cargo = toolchainMusl;
