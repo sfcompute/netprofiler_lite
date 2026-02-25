@@ -1756,7 +1756,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
 
     println!("Legend:");
     println!("- thrpt: total goodput in Gbps (successful bytes only)");
-    println!("- win(a|p90|max): 1s window goodput samples in Gbps (stream-progress bytes)");
+    println!("- win(a|p50|p90|max): 1s window goodput samples in Gbps (stream-progress bytes)");
     println!("- target_host: hostname contacted for the backend (Host/SNI)");
     println!();
 
@@ -1808,7 +1808,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             "thrpt",
             "gr",
             "ok%",
-            "win(a|p90|max)",
+            "win(a|p50|p90|max)",
         ]);
 
     for r in &rows {
@@ -1846,8 +1846,8 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             "-".to_string()
         } else {
             format!(
-                "{:.1}|{:.1}|{:.1}",
-                r.window_gbps_mean, r.window_gbps_p90, r.window_gbps_max
+                "{:.1}|{:.1}|{:.1}|{:.1}",
+                r.window_gbps_mean, r.window_gbps_p50, r.window_gbps_p90, r.window_gbps_max
             )
         };
 
@@ -1898,7 +1898,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             continue;
         }
 
-        let mut tps_nonzero: Vec<f64> = dir_results
+        let tps_nonzero: Vec<f64> = dir_results
             .iter()
             .filter(|r| r.successes > 0 && r.bytes > 0)
             .map(|r| r.throughput_gbps)
@@ -1914,19 +1914,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         });
         let ok_rate = fmt_rate(ok_sum, tot_sum);
 
-        let (avg, p90v, min, max) = if tps_nonzero.is_empty() {
-            (0.0, 0.0, 0.0, 0.0)
-        } else {
-            let n = tps_nonzero.len() as f64;
-            let sum: f64 = tps_nonzero.iter().sum();
-            let avg = sum / n;
-            let mut sorted = tps_nonzero.clone();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let min = *sorted.first().unwrap_or(&0.0);
-            let max = *sorted.last().unwrap_or(&0.0);
-            let p90v = p90(&mut tps_nonzero);
-            (avg, p90v, min, max)
-        };
+        let (_, avg, p50v, p90v, min, max) = stats(&tps_nonzero);
 
         let g = grade(avg);
         let g = if !no_color && std::io::stdout().is_terminal() {
@@ -1936,7 +1924,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         };
 
         println!(
-            "\n{:>8} stats: endpoints={} ok_rate={} ({}/{}) rl_endpoints={} zero_ok={} | thrpt(avg/p90/min/max)={:.2}/{:.2}/{:.2}/{:.2}Gbps {}",
+            "\n{:>8} stats: endpoints={} ok_rate={} ({}/{}) rl_endpoints={} zero_ok={} | thrpt(avg/p50/p90/min/max)={:.2}/{:.2}/{:.2}/{:.2}/{:.2}Gbps {}",
             match dir {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
@@ -1948,6 +1936,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             rate_limited,
             zero_ok,
             avg,
+            p50v,
             p90v,
             min,
             max,
