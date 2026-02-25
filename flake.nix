@@ -20,10 +20,11 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        toolchain = fenix.packages.${system}.stable;
+        # Fenix toolchain provides `cargo`, `rustc`, `clippy`, `rustfmt`, etc.
+        toolchain = fenix.packages.${system}.stable.toolchain;
         rustPlatform = pkgs.makeRustPlatform {
-          cargo = toolchain.cargo;
-          rustc = toolchain.rustc;
+          cargo = toolchain;
+          rustc = toolchain;
         };
         cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         pkgVersion = cargoToml.package.version;
@@ -49,8 +50,8 @@
             let
               toolchainMusl = toolchain.withTargets [ "x86_64-unknown-linux-musl" ];
               rustPlatformMusl = pkgs.makeRustPlatform {
-                cargo = toolchainMusl.cargo;
-                rustc = toolchainMusl.rustc;
+                cargo = toolchainMusl;
+                rustc = toolchainMusl;
               };
             in
             rustPlatformMusl.buildRustPackage {
@@ -104,10 +105,7 @@
             pkgs.curl
             pkgs.doppler
 
-            toolchain.cargo
-            toolchain.clippy
-            toolchain.rustc
-            toolchain.rustfmt
+            toolchain
           ];
         };
 
