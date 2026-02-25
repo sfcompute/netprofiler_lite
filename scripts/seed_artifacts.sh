@@ -12,6 +12,8 @@ need() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; 
 need aws
 need dd
 need curl
+need head
+need tr
 
 # Speed knobs
 # - SEED_CONCURRENCY: parallelism per bucket/region
@@ -392,20 +394,20 @@ if [[ ! -f "$payload" ]]; then
 fi
 
 bucket_defaults() {
-  # Prefer an AWS account id based suffix to avoid global name collisions.
-  local acct
-  acct="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
-  if [[ -z "$acct" || "$acct" == "None" ]]; then
-    acct="${USER:-unknown}"
-  fi
-  # Allow overriding the base name if desired.
-  local base
-  base="${NETPROFILER_BUCKET_BASE:-netprofiler-lite}"
+  # Default to a random suffix to avoid leaking AWS account ids and to avoid
+  # global name collisions.
+  random_suffix() {
+    LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 8
+  }
 
-  if [[ -z "$BUCKET_EUN1" ]]; then BUCKET_EUN1="${base}-${acct}-eun1"; fi
-  if [[ -z "$BUCKET_EUC1" ]]; then BUCKET_EUC1="${base}-${acct}-euc1"; fi
-  if [[ -z "$BUCKET_USW2" ]]; then BUCKET_USW2="${base}-${acct}-usw2"; fi
-  if [[ -z "$BUCKET_USE1" ]]; then BUCKET_USE1="${base}-${acct}-use1"; fi
+  # Allow overriding the base name if desired (to keep stable buckets).
+  local base
+  base="${NETPROFILER_BUCKET_BASE:-netprofiler-lite-$(random_suffix)}"
+
+  if [[ -z "$BUCKET_EUN1" ]]; then BUCKET_EUN1="${base}-eun1"; fi
+  if [[ -z "$BUCKET_EUC1" ]]; then BUCKET_EUC1="${base}-euc1"; fi
+  if [[ -z "$BUCKET_USW2" ]]; then BUCKET_USW2="${base}-usw2"; fi
+  if [[ -z "$BUCKET_USE1" ]]; then BUCKET_USE1="${base}-use1"; fi
 }
 
 bucket_defaults
@@ -415,6 +417,12 @@ echo "  BUCKET_EUN1=$BUCKET_EUN1"
 echo "  BUCKET_EUC1=$BUCKET_EUC1"
 echo "  BUCKET_USW2=$BUCKET_USW2"
 echo "  BUCKET_USE1=$BUCKET_USE1"
+
+echo "For nix run .#bench with S3, export:" >&2
+echo "  export NETPROFILER_S3_BUCKET_EUN1=$BUCKET_EUN1" >&2
+echo "  export NETPROFILER_S3_BUCKET_EUC1=$BUCKET_EUC1" >&2
+echo "  export NETPROFILER_S3_BUCKET_USW2=$BUCKET_USW2" >&2
+echo "  export NETPROFILER_S3_BUCKET_USE1=$BUCKET_USE1" >&2
 
 [[ -n "$BUCKET_EUN1" ]] || die "BUCKET_EUN1 not set"
 [[ -n "$BUCKET_EUC1" ]] || die "BUCKET_EUC1 not set"

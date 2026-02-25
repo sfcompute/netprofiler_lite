@@ -18,9 +18,9 @@ Run with Nix + Doppler so secrets are not written to disk:
 
 ```bash
 # Optional: set explicit bucket names.
-# If omitted, the seeder defaults to globally-unique names based on your AWS account id.
-# You can override the base name via NETPROFILER_BUCKET_BASE.
-# export NETPROFILER_BUCKET_BASE=netprofiler-lite
+# If omitted, the seeder creates globally-unique names using a random suffix (no AWS account id).
+# To keep stable bucket names across runs, set a fixed base name:
+# export NETPROFILER_BUCKET_BASE=netprofiler-lite-<suffix>
 # export BUCKET_EUN1=...
 # export BUCKET_EUC1=...
 # export BUCKET_USW2=...
