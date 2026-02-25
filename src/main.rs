@@ -37,7 +37,7 @@ struct Cli {
     compare: CompareArgs,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Default)]
 struct CompareArgs {
     /// Comma-separated backend specs.
     /// S3: bucket:region
@@ -101,28 +101,6 @@ struct CompareArgs {
     /// Progress update interval in milliseconds
     #[arg(long)]
     progress_interval_ms: Option<u64>,
-}
-
-impl Default for CompareArgs {
-    fn default() -> Self {
-        Self {
-            backends: None,
-            ensure: false,
-            direction: None,
-            concurrency: None,
-            duration: None,
-            prefix: None,
-            file_count: None,
-            file_size_mb: None,
-            output: None,
-            report_toml: None,
-            no_report_toml: false,
-            no_color: false,
-            progress: false,
-            no_progress: false,
-            progress_interval_ms: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]
@@ -293,7 +271,7 @@ fn merge_compare(
         report_toml,
         no_report_toml: args.no_report_toml || file.no_report_toml.unwrap_or(false),
         no_color,
-        progress: progress,
+        progress,
         no_progress: false,
         progress_interval_ms: Some(interval_ms),
     };
@@ -402,7 +380,7 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
                 .unwrap_or("http");
             out.push(BackendSpec {
                 backend_type: BackendType::Http,
-                name: format!("http-{}", host),
+                name: format!("http-{host}"),
                 bucket: base,
                 region_or_account: "".to_string(),
             });
@@ -416,8 +394,7 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
         if parts[0].eq_ignore_ascii_case("r2") {
             if !(2..=3).contains(&parts.len()) {
                 return Err(anyhow!(
-                    "invalid R2 backend spec '{}': use r2:bucket[:account_id]",
-                    raw
+                    "invalid R2 backend spec '{raw}': use r2:bucket[:account_id]"
                 ));
             }
             let bucket = parts[1].to_string();
@@ -429,7 +406,7 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
             };
             out.push(BackendSpec {
                 backend_type: BackendType::R2,
-                name: format!("r2-{}", bucket),
+                name: format!("r2-{bucket}"),
                 bucket,
                 region_or_account: account_id,
             });
@@ -439,15 +416,14 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
         // S3: bucket:region
         if parts.len() != 2 {
             return Err(anyhow!(
-                "invalid S3 backend spec '{}': use bucket:region",
-                raw
+                "invalid S3 backend spec '{raw}': use bucket:region"
             ));
         }
         let bucket = parts[0].to_string();
         let region = parts[1].to_string();
         out.push(BackendSpec {
             backend_type: BackendType::S3,
-            name: format!("s3-{}-{}", bucket, region),
+            name: format!("s3-{bucket}-{region}"),
             bucket,
             region_or_account: region,
         });
@@ -631,7 +607,7 @@ fn hmac_sha256(key: &[u8], msg: &[u8]) -> Vec<u8> {
 }
 
 fn signing_key(secret: &str, date: &str, region: &str, service: &str) -> Vec<u8> {
-    let k_date = hmac_sha256(format!("AWS4{}", secret).as_bytes(), date.as_bytes());
+    let k_date = hmac_sha256(format!("AWS4{secret}").as_bytes(), date.as_bytes());
     let k_region = hmac_sha256(&k_date, region.as_bytes());
     let k_service = hmac_sha256(&k_region, service.as_bytes());
     hmac_sha256(&k_service, b"aws4_request")
@@ -648,7 +624,7 @@ fn pct_encode(input: &str) -> String {
         if is_unreserved(b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{:02X}", b));
+            out.push_str(&format!("%{b:02X}"));
         }
     }
     out
@@ -669,21 +645,21 @@ fn canonical_query(params: &BTreeMap<String, String>) -> String {
     pairs.sort();
     pairs
         .into_iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+        .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join("&")
 }
 
 fn s3_host(bucket: &str, region: &str) -> String {
     if region == "us-east-1" {
-        format!("{}.s3.amazonaws.com", bucket)
+        format!("{bucket}.s3.amazonaws.com")
     } else {
-        format!("{}.s3.{}.amazonaws.com", bucket, region)
+        format!("{bucket}.s3.{region}.amazonaws.com")
     }
 }
 
 fn r2_host(account_id: &str) -> String {
-    format!("{}.r2.cloudflarestorage.com", account_id)
+    format!("{account_id}.r2.cloudflarestorage.com")
 }
 
 fn backend_region_for_signing(b: &Backend) -> &str {
@@ -716,15 +692,15 @@ fn object_url(b: &Backend, key: &str, query: Option<&str>) -> String {
         let base = b.spec.bucket.trim_end_matches('/');
         let path = pct_encode_path(key);
         match query {
-            Some(q) if !q.is_empty() => format!("{}/{}?{}", base, path, q),
-            _ => format!("{}/{}", base, path),
+            Some(q) if !q.is_empty() => format!("{base}/{path}?{q}"),
+            _ => format!("{base}/{path}"),
         }
     } else {
         let host = backend_host(b);
         let uri = canonical_uri_for_object(b, key);
         match query {
-            Some(q) if !q.is_empty() => format!("https://{}{}?{}", host, uri, q),
-            _ => format!("https://{}{}", host, uri),
+            Some(q) if !q.is_empty() => format!("https://{host}{uri}?{q}"),
+            _ => format!("https://{host}{uri}"),
         }
     }
 }
@@ -742,7 +718,7 @@ fn presign_get_url(b: &Backend, key: &str, expires: u64, now: DateTime<Utc>) -> 
     let uri = canonical_uri_for_object(b, key);
     let (amz_date, date_stamp) = amz_dates(now);
 
-    let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
+    let credential_scope = format!("{date_stamp}/{region}/{service}/aws4_request");
     let credential = format!("{}/{}", creds.access_key_id, credential_scope);
 
     let mut params = BTreeMap::new();
@@ -759,19 +735,16 @@ fn presign_get_url(b: &Backend, key: &str, expires: u64, now: DateTime<Utc>) -> 
     }
     let canonical_qs = canonical_query(&params);
 
-    let canonical_headers = format!("host:{}\n", host);
+    let canonical_headers = format!("host:{host}\n");
     let signed_headers = "host";
     let payload_hash = "UNSIGNED-PAYLOAD";
     let canonical_request = format!(
-        "GET\n{}\n{}\n{}\n{}\n{}",
-        uri, canonical_qs, canonical_headers, signed_headers, payload_hash
+        "GET\n{uri}\n{canonical_qs}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
     );
     let canonical_request_hash = sha256_hex(canonical_request.as_bytes());
 
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        amz_date, credential_scope, canonical_request_hash
-    );
+    let string_to_sign =
+        format!("AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{canonical_request_hash}");
     let key_bytes = signing_key(&creds.secret_access_key, &date_stamp, region, service);
     let sig = hmac_sha256(&key_bytes, string_to_sign.as_bytes());
     let signature = hex_lower(&sig);
@@ -818,16 +791,13 @@ fn sign_headers(
     let signed_headers = signed_headers_list.join(";");
 
     let canonical_request = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}",
-        method, canonical_uri, canonical_query, canonical_headers, signed_headers, payload_hash
+        "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
     );
     let canonical_request_hash = sha256_hex(canonical_request.as_bytes());
 
-    let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        amz_date, credential_scope, canonical_request_hash
-    );
+    let credential_scope = format!("{date_stamp}/{region}/{service}/aws4_request");
+    let string_to_sign =
+        format!("AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{canonical_request_hash}");
     let key_bytes = signing_key(&creds.secret_access_key, &date_stamp, region, service);
     let sig = hmac_sha256(&key_bytes, string_to_sign.as_bytes());
     let signature = hex_lower(&sig);
@@ -839,7 +809,7 @@ fn sign_headers(
 
 async fn head_bucket(http: &HttpClient, b: &Backend) -> Result<reqwest::Response> {
     let host = backend_host(b);
-    let url = format!("https://{}/", host);
+    let url = format!("https://{host}/");
     let now = Utc::now();
     let mut headers = BTreeMap::new();
     let empty_hash = sha256_hex(b"");
@@ -866,13 +836,12 @@ async fn create_bucket(http: &HttpClient, b: &Backend) -> Result<()> {
     }
     let region = b.spec.region_or_account.as_str();
     let host = backend_host(b);
-    let url = format!("https://{}/", host);
+    let url = format!("https://{host}/");
     let (body, content_type) = if region == "us-east-1" {
         (Bytes::new(), None)
     } else {
         let xml = format!(
-            "<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><LocationConstraint>{}</LocationConstraint></CreateBucketConfiguration>",
-            region
+            "<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><LocationConstraint>{region}</LocationConstraint></CreateBucketConfiguration>"
         );
         (Bytes::from(xml), Some("application/xml"))
     };
@@ -895,14 +864,14 @@ async fn create_bucket(http: &HttpClient, b: &Backend) -> Result<()> {
     } else {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        Err(anyhow!("create bucket failed ({}): {}", status, text))
+        Err(anyhow!("create bucket failed ({status}): {text}"))
     }
 }
 
 async fn head_object(http: &HttpClient, b: &Backend, key: &str) -> Result<reqwest::Response> {
     let host = backend_host(b);
     let uri = canonical_uri_for_object(b, key);
-    let url = format!("https://{}{}", host, uri);
+    let url = format!("https://{host}{uri}");
     let now = Utc::now();
     let mut headers = BTreeMap::new();
     let empty_hash = sha256_hex(b"");
@@ -913,13 +882,13 @@ async fn head_object(http: &HttpClient, b: &Backend, key: &str) -> Result<reqwes
     for (k, v) in headers {
         req = req.header(k, v);
     }
-    Ok(req.send().await.context("head object")?)
+    req.send().await.context("head object")
 }
 
 async fn put_object(http: &HttpClient, b: &Backend, key: &str, body: Bytes) -> Result<()> {
     let host = backend_host(b);
     let uri = canonical_uri_for_object(b, key);
-    let url = format!("https://{}{}", host, uri);
+    let url = format!("https://{host}{uri}");
     let payload_hash = sha256_hex(&body);
     let now = Utc::now();
     let mut headers = BTreeMap::new();
@@ -935,7 +904,7 @@ async fn put_object(http: &HttpClient, b: &Backend, key: &str, body: Bytes) -> R
     } else {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        Err(anyhow!("put object failed ({}): {}", status, text))
+        Err(anyhow!("put object failed ({status}): {text}"))
     }
 }
 
@@ -969,7 +938,7 @@ async fn ensure_bucket_and_objects(http: &HttpClient, b: &Backend, cfg: &RunConf
     } else {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("head bucket failed ({}): {}", status, text));
+        return Err(anyhow!("head bucket failed ({status}): {text}"));
     }
 
     let seed_count = cfg.file_count.min(100);
@@ -983,7 +952,7 @@ async fn ensure_bucket_and_objects(http: &HttpClient, b: &Backend, cfg: &RunConf
         if r.status().as_u16() != 404 {
             let status = r.status();
             let text = r.text().await.unwrap_or_default();
-            return Err(anyhow!("head object failed ({}): {}", status, text));
+            return Err(anyhow!("head object failed ({status}): {text}"));
         }
         put_object(http, b, &key, payload.clone()).await?;
     }
@@ -1029,7 +998,6 @@ async fn run_download(
         let stop = stop.clone();
         let bytes_progress = bytes_progress.clone();
         let window_gbps_samples = window_gbps_samples.clone();
-        let until = until;
         tokio::spawn(async move {
             let mut last = bytes_progress.load(Ordering::Relaxed);
             let mut last_t = Instant::now();
@@ -1066,8 +1034,7 @@ async fn run_download(
                 let gbps = (b as f64 * 8.0) / elapsed / 1_000_000_000.0;
                 let left = duration_secs.saturating_sub(start.elapsed().as_secs());
                 eprintln!(
-                    "[{}] {:.0}s elapsed, {}s left | xfers={} ok={} bytes={} | {:.3} Gbps",
-                    label, elapsed, left, t, ok, b, gbps
+                    "[{label}] {elapsed:.0}s elapsed, {left}s left | xfers={t} ok={ok} bytes={b} | {gbps:.3} Gbps"
                 );
                 tokio::time::sleep(interval).await;
             }
@@ -1268,7 +1235,6 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
         let stop = stop.clone();
         let bytes = bytes.clone();
         let window_gbps_samples = window_gbps_samples.clone();
-        let until = until;
         tokio::spawn(async move {
             let mut last = bytes.load(Ordering::Relaxed);
             let mut last_t = Instant::now();
@@ -1318,10 +1284,10 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
         handles.push(tokio::spawn(async move {
             let _permit = permit;
             let i = idx.fetch_add(1, Ordering::Relaxed);
-            let key = format!("{}.{}-upload", prefix, i);
+            let key = format!("{prefix}.{i}-upload");
             let uri = canonical_uri_for_object(&b, &key);
             let host = backend_host(&b);
-            let url = format!("https://{}{}", host, uri);
+            let url = format!("https://{host}{uri}");
 
             let now = Utc::now();
             let mut headers = BTreeMap::new();
@@ -1452,7 +1418,7 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
 }
 
 fn ansi(color: &str, s: &str) -> String {
-    format!("\x1b[{}m{}\x1b[0m", color, s)
+    format!("\x1b[{color}m{s}\x1b[0m")
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -1477,20 +1443,26 @@ fn url_host(url: &str) -> String {
 fn endpoint_id(backend_type: BackendType, bucket_or_base: &str) -> String {
     match backend_type {
         BackendType::S3 => {
-            let b = bucket_or_base.split('-').last().unwrap_or(bucket_or_base);
-            format!("s3:{}", b)
+            let b = bucket_or_base
+                .split('-')
+                .next_back()
+                .unwrap_or(bucket_or_base);
+            format!("s3:{b}")
         }
         BackendType::R2 => {
-            let b = bucket_or_base.split('-').last().unwrap_or(bucket_or_base);
-            format!("r2:{}", b)
+            let b = bucket_or_base
+                .split('-')
+                .next_back()
+                .unwrap_or(bucket_or_base);
+            format!("r2:{b}")
         }
         BackendType::Http => {
             let host = url_host(bucket_or_base);
             if host.ends_with(".r2.dev") {
                 let stem = host.trim_end_matches(".r2.dev");
-                format!("r2pub:{}", stem)
+                format!("r2pub:{stem}")
             } else {
-                format!("http:{}", host)
+                format!("http:{host}")
             }
         }
     }
@@ -1600,7 +1572,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
     println!("Legend:");
     println!("- thrpt: total goodput in Gbps (successful bytes only)");
     println!("- win(a|p90|max): 1s window goodput samples in Gbps (stream-progress bytes)");
-    println!("");
+    println!();
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
@@ -1725,7 +1697,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         ]);
     }
 
-    println!("{}", table);
+    println!("{table}");
 
     for dir in [Direction::Download, Direction::Upload] {
         let mut tps: Vec<f64> = results
@@ -1961,7 +1933,7 @@ async fn main() -> Result<()> {
             }
 
             let started = Utc::now();
-            let o = run_download(&http, Arc::new(urls), &cfg, &format!("{}", b.spec.name)).await?;
+            let o = run_download(&http, Arc::new(urls), &cfg, &b.spec.name.to_string()).await?;
             all_results.push(BackendRunResult {
                 timestamp: started,
                 backend_type: b.spec.backend_type,
