@@ -47,6 +47,10 @@ netprofiler_lite \
 
 Note: running `netprofiler_lite` with no flags already uses the default endpoints.
 
+Note on public R2: Cloudflare public R2 origins may throttle (HTTP 429). When that happens,
+the tool will show a low `ok%` for those endpoints and the effective sample size (successful
+requests) will be smaller.
+
 Nix:
 
 ```bash
