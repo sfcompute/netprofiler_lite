@@ -69,7 +69,7 @@
               stdenv = pkgs.pkgsStatic.stdenv;
 
               # Force the musl target so the resulting binary is fully static.
-              cargoBuildTarget = "x86_64-unknown-linux-musl";
+              cargoBuildFlags = [ "--target" "x86_64-unknown-linux-musl" ];
               RUSTFLAGS = "-C target-feature=+crt-static";
             }
           else
