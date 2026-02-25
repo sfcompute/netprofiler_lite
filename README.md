@@ -53,6 +53,8 @@ requests) will be smaller.
 
 Nix:
 
+Getting started with Nix: `docs/nix.md`
+
 ```bash
 nix run --accept-flake-config .#bench
 ```
