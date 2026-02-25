@@ -67,7 +67,10 @@
               doCheck = false;
 
               stdenv = pkgs.pkgsStatic.stdenv;
-              CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+
+              # Force the musl target so the resulting binary is fully static.
+              cargoBuildTarget = "x86_64-unknown-linux-musl";
+              RUSTFLAGS = "-C target-feature=+crt-static";
             }
           else
             pkgs.writeText "linux-static-unavailable" "linux-static is only available on Linux";
