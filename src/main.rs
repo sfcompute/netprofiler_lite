@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, Parser, ValueEnum};
-use comfy_table::{presets::ASCII_MARKDOWN, ContentArrangement, Table};
+use comfy_table::{presets::ASCII_MARKDOWN, Cell, Color, ContentArrangement, Table};
 use futures::StreamExt;
 use hmac::{Hmac, Mac};
 use reqwest::Client as HttpClient;
@@ -1602,7 +1602,11 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         results.config.file_size_mb
     );
 
-    println!("Metrics: thrpt_gbps(total ok bytes), win_gbps(avg/p90/max, 1s stream samples), obj_mib_s+req_ms(p50/p90 per successful request)\n");
+    println!("Legend:");
+    println!("- thrpt: total goodput in Gbps (successful bytes only)");
+    println!("- win(a/p90/max): 1s window goodput samples in Gbps (stream-progress bytes)");
+    println!("- objMiB/s(p50/p90): per-success request MiB/s for a single object");
+    println!("- detail: reqms p50/p90 when healthy; otherwise error summary (e.g. 429=...,rl)\n");
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
@@ -1662,6 +1666,8 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         truncate(&parts.join(","), 28)
     }
 
+    let use_color = !no_color && std::io::stdout().is_terminal();
+
     let mut table = Table::new();
     table
         .load_preset(ASCII_MARKDOWN)
@@ -1678,13 +1684,20 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             "ok%",
             "win(a/p90/max)",
             "objMiB/s(p50/p90)",
-            "reqms(p50/p90)",
-            "errs",
+            "detail",
         ]);
 
     for r in &rows {
-        // ANSI escape codes tend to break table layout; keep grades plain.
-        let grade = r.grade.clone();
+        // Use comfy-table styling (not raw ANSI) for consistent alignment.
+        let mut grade_cell = Cell::new(r.grade.clone());
+        if use_color {
+            grade_cell = match r.grade.as_str() {
+                "A+" | "A" => grade_cell.fg(Color::Green),
+                "B" => grade_cell.fg(Color::Yellow),
+                "C" | "D" => grade_cell.fg(Color::Red),
+                _ => grade_cell,
+            };
+        }
 
         let id = truncate(&endpoint_id(r.backend_type, &r.bucket), 18);
         let typ = backend_label(r.backend_type, &r.bucket);
@@ -1694,6 +1707,17 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             r.region_or_account.clone()
         };
         let rate = fmt_rate(r.successes, r.transfers);
+        let mut ok_cell = Cell::new(rate.clone());
+        if use_color {
+            let pct = (r.successes as f64) * 100.0 / (r.transfers.max(1) as f64);
+            ok_cell = if pct >= 99.0 {
+                ok_cell.fg(Color::Green)
+            } else if pct >= 90.0 {
+                ok_cell.fg(Color::Yellow)
+            } else {
+                ok_cell.fg(Color::Red)
+            };
+        }
         let gb = (r.bytes as f64) / 1_000_000_000.0;
 
         let errs = errs_compact(r);
@@ -1723,23 +1747,53 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             format!("{:.0}/{:.0}", r.req_ms_p50, r.req_ms_p90)
         };
 
-        table.add_row([
-            match r.direction {
+        let detail = if errs == "-" {
+            if req_ms == "-" {
+                "-".to_string()
+            } else {
+                format!("reqms={}", req_ms)
+            }
+        } else {
+            errs.clone()
+        };
+
+        let mut type_cell = Cell::new(typ.to_string());
+        if use_color {
+            type_cell = match typ {
+                "S3" => type_cell.fg(Color::Cyan),
+                "R2" => type_cell.fg(Color::Cyan),
+                "R2-public" => type_cell.fg(Color::Magenta),
+                "HTTP" => type_cell.fg(Color::Blue),
+                _ => type_cell,
+            };
+        }
+
+        let mut thrpt_cell = Cell::new(format!("{:.2}", r.throughput_gbps));
+        if use_color {
+            thrpt_cell = if r.throughput_gbps >= 10.0 {
+                thrpt_cell.fg(Color::Green)
+            } else if r.throughput_gbps >= 5.0 {
+                thrpt_cell.fg(Color::Yellow)
+            } else {
+                thrpt_cell.fg(Color::Red)
+            };
+        }
+
+        table.add_row(vec![
+            Cell::new(match r.direction {
                 Direction::Download => "download",
                 Direction::Upload => "upload",
-            }
-            .to_string(),
-            typ.to_string(),
-            id,
-            region,
-            format!("{:.2}", r.throughput_gbps),
-            grade,
-            format!("{:.1}", gb),
-            rate,
-            win,
-            obj_mib,
-            req_ms,
-            errs,
+            }),
+            type_cell,
+            Cell::new(id),
+            Cell::new(region),
+            thrpt_cell,
+            grade_cell,
+            Cell::new(format!("{:.1}", gb)),
+            ok_cell,
+            Cell::new(win),
+            Cell::new(obj_mib),
+            Cell::new(detail),
         ]);
     }
 
