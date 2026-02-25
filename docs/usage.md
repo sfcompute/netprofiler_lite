@@ -2,6 +2,8 @@
 
 This doc contains details that are intentionally kept out of the README.
 
+Nix setup: `docs/nix.md`.
+
 ## CLI
 
 There are no subcommands. Everything is a top-level flag.

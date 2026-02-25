@@ -74,14 +74,9 @@ Or as a flake app:
 nix run .#seed --accept-flake-config
 ```
 
-Note: this repo sets `nixConfig.extra-substituters`. Nix will prompt unless you pass
-`--accept-flake-config` (as shown) or set `accept-flake-config = true` in your Nix config
-(`~/.config/nix/nix.conf` or `/etc/nix/nix.conf`).
+Nix note: see `docs/nix.md`.
 
-## Release Process (Maintainers)
-
-Releases are created by pushing a `v*` git tag. GitHub Actions builds the binaries via Nix and
-attaches tarballs to the GitHub Release.
+Release process: see `docs/release.md`.
 
 ## Seeding Speed Knobs
 
