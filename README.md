@@ -26,7 +26,6 @@ test -n "$version" || { echo "failed to detect latest version"; exit 1; }
 os="$(uname -s)"; arch="$(uname -m)"
 case "${os}-${arch}" in
   Linux-x86_64) asset="netprofiler_lite-${version}-x86_64-unknown-linux-musl.tar.gz" ;;
-  Darwin-x86_64) asset="netprofiler_lite-${version}-x86_64-apple-darwin.tar.gz" ;;
   Darwin-arm64) asset="netprofiler_lite-${version}-aarch64-apple-darwin.tar.gz" ;;
   *) echo "unsupported: ${os}-${arch}"; exit 1 ;;
 esac
