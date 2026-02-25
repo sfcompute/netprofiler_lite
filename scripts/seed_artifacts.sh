@@ -121,6 +121,19 @@ load_aws_creds_from_shared_file() {
       echo "INFO: Loaded AWS creds from $credfile (profile=$profile)" >&2
     fi
   else
+    # If user did not set a profile and there is exactly one profile in the file,
+    # auto-select it. This avoids common "root has a non-default profile" footgun.
+    if [[ -z "${AWS_PROFILE:-}" && -z "${AWS_DEFAULT_PROFILE:-}" && "${profile}" == "default" ]]; then
+      local only_profile
+      only_profile="${profiles_seen}"
+      if [[ -n "$only_profile" && "$only_profile" != *","* && "$only_profile" != "default" && "${AWS_PROFILE_AUTODETECTED:-0}" != "1" ]]; then
+        echo "INFO: Auto-selecting AWS profile '$only_profile' from $credfile" >&2
+        export AWS_PROFILE_AUTODETECTED=1
+        export AWS_PROFILE="$only_profile"
+        load_aws_creds_from_shared_file
+        return 0
+      fi
+    fi
     echo "WARN: No static keys found in $credfile (profile=$profile)" >&2
     if [[ -n "$profiles_seen" ]]; then
       echo "WARN: Profiles present in $credfile: $profiles_seen" >&2
@@ -420,11 +433,7 @@ echo "  BUCKET_EUC1=$BUCKET_EUC1"
 echo "  BUCKET_USW2=$BUCKET_USW2"
 echo "  BUCKET_USE1=$BUCKET_USE1"
 
-echo "For nix run .#bench with S3, export:" >&2
-echo "  export NETPROFILER_S3_BUCKET_EUN1=$BUCKET_EUN1" >&2
-echo "  export NETPROFILER_S3_BUCKET_EUC1=$BUCKET_EUC1" >&2
-echo "  export NETPROFILER_S3_BUCKET_USW2=$BUCKET_USW2" >&2
-echo "  export NETPROFILER_S3_BUCKET_USE1=$BUCKET_USE1" >&2
+
 
 [[ -n "$BUCKET_EUN1" ]] || die "BUCKET_EUN1 not set"
 [[ -n "$BUCKET_EUC1" ]] || die "BUCKET_EUC1 not set"
