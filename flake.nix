@@ -49,12 +49,13 @@
         packages.linux-static =
           if pkgs.stdenv.isLinux then
             let
+              pkgsStatic = pkgs.pkgsStatic;
               toolchainMusl = fenix.packages.${system}.combine [
                 stable.cargo
                 stable.rustc
                 fenix.packages.${system}.targets.x86_64-unknown-linux-musl.latest.rust-std
               ];
-              rustPlatformMusl = pkgs.makeRustPlatform {
+              rustPlatformMusl = pkgsStatic.makeRustPlatform {
                 cargo = toolchainMusl;
                 rustc = toolchainMusl;
               };
@@ -66,10 +67,8 @@
               cargoLock.lockFile = ./Cargo.lock;
               doCheck = false;
 
-              stdenv = pkgs.pkgsStatic.stdenv;
-
               # Force the musl target so the resulting binary is fully static.
-              cargoBuildFlags = [ "--target" "x86_64-unknown-linux-musl" ];
+              cargoBuildTarget = "x86_64-unknown-linux-musl";
               RUSTFLAGS = "-C target-feature=+crt-static";
             }
           else
