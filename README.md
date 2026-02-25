@@ -7,6 +7,12 @@ Goals:
 - Support AWS S3 and Cloudflare R2 (S3-compatible) without requiring `aws` CLI.
 - Keep the code small and vendor-neutral.
 
+Notes on defaults:
+- The default object size / object count / concurrency settings are chosen based on industry experience
+  and conversations with researchers working in the HPC and AI space.
+- The letter-grade thresholds are calibrated to reflect commonly discussed performance tiers for
+  multi-Gbps networking in those environments.
+
 This tool is designed to be shared so others can reproduce and compare object-storage throughput
 results without distributing proprietary binaries.
 

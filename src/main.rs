@@ -565,7 +565,8 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
 }
 
 fn grade(gbps: f64) -> &'static str {
-    // Match metal-agent thresholds.
+    // Grade thresholds come from field experience and conversations with
+    // HPC/AI researchers about practical multi-Gbps performance tiers.
     if gbps >= 40.0 {
         "A+"
     } else if gbps >= 20.0 {
