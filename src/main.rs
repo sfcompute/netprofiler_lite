@@ -1019,6 +1019,8 @@ async fn run_download(
 
     let stop = Arc::new(AtomicBool::new(false));
 
+    // Window sampling is based on bytes completed so far.
+    // Note: a small window can show bursty "max" due to buffering/completions.
     let sampler_task = {
         let stop = stop.clone();
         let bytes = bytes.clone();
@@ -1027,7 +1029,7 @@ async fn run_download(
         tokio::spawn(async move {
             let mut last = bytes.load(Ordering::Relaxed);
             let mut last_t = Instant::now();
-            let tick = Duration::from_millis(500);
+            let tick = Duration::from_secs(1);
             while !stop.load(Ordering::Relaxed) && Instant::now() < until {
                 tokio::time::sleep(tick).await;
                 let now_b = bytes.load(Ordering::Relaxed);
@@ -1261,7 +1263,7 @@ async fn run_upload(http: &HttpClient, b: &Backend, cfg: &RunConfig) -> Result<R
         tokio::spawn(async move {
             let mut last = bytes.load(Ordering::Relaxed);
             let mut last_t = Instant::now();
-            let tick = Duration::from_millis(500);
+            let tick = Duration::from_secs(1);
             while !stop.load(Ordering::Relaxed) && Instant::now() < until {
                 tokio::time::sleep(tick).await;
                 let now_b = bytes.load(Ordering::Relaxed);
@@ -1591,7 +1593,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         results.config.file_size_mb
     );
 
-    println!("Metrics: thrpt_gbps(total), win_gbps(avg/p90/max, 500ms samples), obj_mib_s+req_ms(p50/p90 per successful request)\n");
+    println!("Metrics: thrpt_gbps(total), win_gbps(avg/p90/max, 1s samples), obj_mib_s+req_ms(p50/p90 per successful request)\n");
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
