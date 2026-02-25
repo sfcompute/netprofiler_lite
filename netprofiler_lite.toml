@@ -17,13 +17,13 @@ backends = [
   "sf-netprofiler-lite-903616605317-use1:us-east-1",
 
   # Public R2 origins (example; replace with your public endpoints)
-  # "https://pub-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.r2.dev",
-  # "https://pub-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.r2.dev",
+  "https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev",
+  "https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev",
 ]
 
 direction = "download"   # download|upload|both
 concurrency = 256
-duration = 10             # seconds
+duration = 15             # seconds
 prefix = "data-8m"
 file_count = 100
 file_size_mb = 8

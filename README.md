@@ -23,21 +23,34 @@ Credentialed operations are maintainer-only:
 
 ## Partner quickstart (recommended)
 
-1) Build with Nix (deterministic):
+1) Run with Nix (recommended)
+
+Print help:
 
 ```bash
-nix build --accept-flake-config
-./result/bin/netprofiler_lite --help
+nix run --accept-flake-config . -- --help
 ```
 
-Or build with Rust toolchain:
+Run the default public endpoints (copy/paste):
+
+```bash
+nix run --accept-flake-config .#bench
+```
+
+If you are running from GitHub (no checkout required):
+
+```bash
+nix run --accept-flake-config github:kennethdsheridan/netprofiler_lite#bench
+```
+
+2) Or build with Rust toolchain
 
 ```bash
 cargo build --release
 ./target/release/netprofiler_lite --help
 ```
 
-2) Configure backends
+3) Configure backends (optional)
 
 Edit `netprofiler_lite.toml` and set `backends = [...]`.
 
@@ -53,6 +66,19 @@ Edit `netprofiler_lite.toml` and set `backends = [...]`.
 ```
 
 The binary reads `./netprofiler_lite.toml` automatically when present. CLI flags override config.
+
+Copy/paste run command (same defaults as `.#bench`):
+
+```bash
+./target/release/netprofiler_lite \
+  --backends "sf-netprofiler-lite-903616605317-eun1:eu-north-1,sf-netprofiler-lite-903616605317-euc1:eu-central-1,sf-netprofiler-lite-903616605317-usw2:us-west-2,sf-netprofiler-lite-903616605317-use1:us-east-1,https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev" \
+  --direction download \
+  --concurrency 256 \
+  --duration 15 \
+  --prefix data-8m \
+  --file-count 100 \
+  --file-size-mb 8
+```
 
 ## CLI shape
 

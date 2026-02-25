@@ -326,7 +326,7 @@ fn merge_compare(
         .or(file.direction)
         .unwrap_or(DirectionArg::Download);
     let concurrency = args.concurrency.or(file.concurrency).unwrap_or(256);
-    let duration = args.duration.or(file.duration).unwrap_or(10);
+    let duration = args.duration.or(file.duration).unwrap_or(15);
     let prefix = args
         .prefix
         .clone()
