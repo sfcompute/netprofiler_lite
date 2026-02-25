@@ -1,6 +1,6 @@
 # Preseeding Test Objects (Maintainers)
 
-Partners/end-users should not need any credentials to run download benchmarks.
+End-users should not need any credentials to run download benchmarks.
 This document is for maintainers who seed objects and make them public-readable.
 
 Tip: If you want `nix run .#bench` to include S3 without hardcoding bucket names in the repo,
@@ -10,7 +10,7 @@ tell users to export `NETPROFILER_S3_BUCKET_EUN1/EUC1/USW2/USE1` and then run th
 
 - Creates S3 buckets (if missing) and uploads the test objects.
 - Uploads objects to Cloudflare R2 buckets.
-- Leaves partners with public-readable URLs so they can run download tests with no credentials.
+- Leaves end-users with public-readable URLs so they can run download tests with no credentials.
 
 ## Default Bucket Names
 
@@ -111,9 +111,9 @@ If you need `aws configure`, run it inside the Nix dev shell:
 nix develop --accept-flake-config -c aws configure
 ```
 
-## Cloudflare R2 Public Access (Partner Downloads)
+## Cloudflare R2 Public Access (Anonymous Downloads)
 
-To enable anonymous downloads for partners:
+To enable anonymous downloads:
 
 - Cloudflare Dashboard -> R2 -> Buckets -> select bucket
 - Enable "Public access" (creates an `r2.dev` URL)

@@ -1,18 +1,18 @@
 # netprofiler_lite
 
-Small, shareable object-storage network benchmark for datacenter providers.
+Small, shareable object-storage network benchmark.
 
 Goals:
 - Compare multi-region object storage throughput from a host.
 - Support AWS S3 and Cloudflare R2 (S3-compatible) without requiring `aws` CLI.
 - Keep the code small and vendor-neutral.
 
-This is intended to be shared with providers (e.g. NDG) to reproduce observed results
-without distributing any proprietary binaries or internal agent code.
+This tool is designed to be shared so others can reproduce and compare object-storage throughput
+results without distributing proprietary binaries.
 
 ## No Credentials Required (Partner Runs)
 
-If you are a partner/end-user running the benchmark:
+If you are an end-user running the benchmark:
 - You do NOT need AWS or R2 credentials.
 - You do NOT need `aws` CLI.
 - You ONLY need public-readable test objects (provided by the benchmark maintainer).
@@ -107,9 +107,9 @@ Comma-separated specs:
 
 ## Credentials
 
-Partners/end-users: you can skip this section.
+End-users: you can skip this section.
 
-For partner download runs, do NOT set any credentials; just run with public backends.
+For end-user download runs, do NOT set any credentials; just run with public backends.
 
 S3 (AWS):
 - Prefers env vars:
@@ -159,7 +159,7 @@ Override just one thing (example):
 ./target/release/netprofiler_lite --duration 60
 ```
 
-If objects are missing: partners should ask the maintainer to seed them (see `docs/preseed.md`).
+If objects are missing: ask the maintainer to seed them (see `docs/preseed.md`).
 
 Output formats:
 - `--output human` (default)
