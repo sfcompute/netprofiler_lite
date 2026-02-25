@@ -21,7 +21,8 @@
       let
         pkgs = import nixpkgs { inherit system; };
         # Fenix toolchain provides `cargo`, `rustc`, `clippy`, `rustfmt`, etc.
-        toolchain = fenix.packages.${system}.stable.toolchain;
+        stable = fenix.packages.${system}.stable;
+        toolchain = stable.toolchain;
         rustPlatform = pkgs.makeRustPlatform {
           cargo = toolchain;
           rustc = toolchain;
@@ -48,7 +49,11 @@
         packages.linux-static =
           if pkgs.stdenv.isLinux then
             let
-              toolchainMusl = toolchain.withTargets [ "x86_64-unknown-linux-musl" ];
+              toolchainMusl = fenix.packages.${system}.combine [
+                stable.cargo
+                stable.rustc
+                fenix.packages.${system}.targets.x86_64-unknown-linux-musl.latest.rust-std
+              ];
               rustPlatformMusl = pkgs.makeRustPlatform {
                 cargo = toolchainMusl;
                 rustc = toolchainMusl;
@@ -105,7 +110,10 @@
             pkgs.curl
             pkgs.doppler
 
-            toolchain
+            stable.cargo
+            stable.clippy
+            stable.rustc
+            stable.rustfmt
           ];
         };
 

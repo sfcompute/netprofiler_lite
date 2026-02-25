@@ -141,7 +141,7 @@ struct Cli {
 struct CompareArgs {
     /// Comma-separated backend specs.
     /// S3: bucket:region
-    /// R2: r2:bucket:account_id or r2:bucket (uses R2_ACCOUNT_ID)
+    /// R2: r2:bucket (uses R2_ACCOUNT_ID)
     #[arg(long)]
     backends: Option<String>,
 
@@ -472,8 +472,22 @@ fn target_host(b: &Backend) -> String {
     match b.spec.backend_type {
         BackendType::Http => url_host(&b.spec.bucket),
         BackendType::S3 => s3_service_host(&b.spec.region_or_account),
-        BackendType::R2 => backend_host(b),
+        BackendType::R2 => redact_r2_account_host(&backend_host(b)),
     }
+}
+
+fn redact_r2_account_host(host: &str) -> String {
+    // Avoid printing account identifiers in hostnames like:
+    //   <32-hex>.r2.cloudflarestorage.com
+    // while still keeping the effective hostname family visible.
+    const SUFFIX: &str = ".r2.cloudflarestorage.com";
+    if let Some(prefix) = host.strip_suffix(SUFFIX) {
+        let is_hex32 = prefix.len() == 32 && prefix.chars().all(|c| c.is_ascii_hexdigit());
+        if is_hex32 {
+            return format!("redacted{SUFFIX}");
+        }
+    }
+    host.to_string()
 }
 
 fn s3_service_host(region: &str) -> String {
@@ -520,16 +534,17 @@ fn parse_backends(input: &str) -> Result<Vec<BackendSpec>> {
         if parts[0].eq_ignore_ascii_case("r2") {
             if !(2..=3).contains(&parts.len()) {
                 return Err(anyhow!(
-                    "invalid R2 backend spec '{raw}': use r2:bucket[:account_id]"
+                    "invalid R2 backend spec '{raw}': use r2:bucket"
                 ));
             }
             let bucket = parts[1].to_string();
-            let account_id = if parts.len() == 3 {
-                parts[2].to_string()
-            } else {
-                std::env::var("R2_ACCOUNT_ID")
-                    .context("R2_ACCOUNT_ID required when using r2:bucket")?
-            };
+            if parts.len() == 3 {
+                return Err(anyhow!(
+                    "invalid R2 backend spec '{raw}': do not inline account ids; set R2_ACCOUNT_ID instead"
+                ));
+            }
+            let account_id = std::env::var("R2_ACCOUNT_ID")
+                .context("R2_ACCOUNT_ID required when using r2:bucket")?;
             out.push(BackendSpec {
                 backend_type: BackendType::R2,
                 name: format!("r2-{bucket}"),
