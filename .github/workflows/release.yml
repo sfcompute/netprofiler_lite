@@ -15,11 +15,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v12
 
-      - name: Build (x86_64-unknown-linux-gnu)
-        run: cargo build --release
+      - name: Nix build
+        run: nix build --accept-flake-config
 
       - name: Package
         shell: bash
@@ -28,7 +28,37 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           name="netprofiler_lite-${version}-x86_64-unknown-linux-gnu"
           mkdir -p dist
-          cp target/release/netprofiler_lite "dist/netprofiler_lite"
+          cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
+          tar -C dist -czf "${name}.tar.gz" netprofiler_lite
+          sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            netprofiler_lite-*.tar.gz
+            netprofiler_lite-*.tar.gz.sha256
+
+  build-macos-x86_64:
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v12
+
+      - name: Nix build
+        run: nix build --accept-flake-config
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="netprofiler_lite-${version}-x86_64-apple-darwin"
+          mkdir -p dist
+          cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
           tar -C dist -czf "${name}.tar.gz" netprofiler_lite
           shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
 
@@ -39,39 +69,28 @@ jobs:
             netprofiler_lite-*.tar.gz
             netprofiler_lite-*.tar.gz.sha256
 
-  build-macos:
+  build-macos-arm64:
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v12
 
-      - name: Build (x86_64-apple-darwin)
-        run: cargo build --release --target x86_64-apple-darwin
-
-      - name: Build (aarch64-apple-darwin)
-        run: cargo build --release --target aarch64-apple-darwin
+      - name: Nix build
+        run: nix build --accept-flake-config
 
       - name: Package
         shell: bash
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
+          name="netprofiler_lite-${version}-aarch64-apple-darwin"
           mkdir -p dist
-
-          name_x86="netprofiler_lite-${version}-x86_64-apple-darwin"
-          cp target/x86_64-apple-darwin/release/netprofiler_lite "dist/netprofiler_lite"
-          tar -C dist -czf "${name_x86}.tar.gz" netprofiler_lite
-          shasum -a 256 "${name_x86}.tar.gz" > "${name_x86}.tar.gz.sha256"
-
-          name_arm="netprofiler_lite-${version}-aarch64-apple-darwin"
-          cp target/aarch64-apple-darwin/release/netprofiler_lite "dist/netprofiler_lite"
-          tar -C dist -czf "${name_arm}.tar.gz" netprofiler_lite
-          shasum -a 256 "${name_arm}.tar.gz" > "${name_arm}.tar.gz.sha256"
+          cp ./result/bin/netprofiler_lite "dist/netprofiler_lite"
+          tar -C dist -czf "${name}.tar.gz" netprofiler_lite
+          shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
