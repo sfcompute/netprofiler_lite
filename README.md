@@ -37,16 +37,6 @@ Run the default public endpoints (copy/paste):
 nix run --accept-flake-config .#bench
 ```
 
-To include S3 in the same run (no credentials needed, but bucket names must be provided by the maintainer):
-
-```bash
-export NETPROFILER_S3_BUCKET_EUN1="<public-bucket-eun1>"
-export NETPROFILER_S3_BUCKET_EUC1="<public-bucket-euc1>"
-export NETPROFILER_S3_BUCKET_USW2="<public-bucket-usw2>"
-export NETPROFILER_S3_BUCKET_USE1="<public-bucket-use1>"
-nix run --accept-flake-config .#bench
-```
-
 If you are running from GitHub (no checkout required):
 
 ```bash
@@ -85,7 +75,7 @@ Copy/paste run command (same defaults as `.#bench`):
 
 ```bash
 ./target/release/netprofiler_lite \
-  --backends "https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev" \
+  --backends "sf-netprofiler-lite-public-6f9c2e-eun1:eu-north-1,sf-netprofiler-lite-public-6f9c2e-euc1:eu-central-1,sf-netprofiler-lite-public-6f9c2e-usw2:us-west-2,sf-netprofiler-lite-public-6f9c2e-use1:us-east-1,https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev" \
   --direction download \
   --concurrency 256 \
   --duration 15 \
@@ -93,9 +83,6 @@ Copy/paste run command (same defaults as `.#bench`):
   --file-count 100 \
   --file-size-mb 8
 ```
-
-To include S3 in the run, ask the maintainer for the public S3 bucket names and add them as
-`bucket:region` entries.
 
 ## CLI shape
 

@@ -12,15 +12,26 @@ tell users to export `NETPROFILER_S3_BUCKET_EUN1/EUC1/USW2/USE1` and then run th
 - Uploads objects to Cloudflare R2 buckets.
 - Leaves partners with public-readable URLs so they can run download tests with no credentials.
 
+## Default Bucket Names
+
+The distribution defaults (used by `netprofiler_lite.toml` and `nix run .#bench`) are:
+
+- `sf-netprofiler-lite-public-6f9c2e-eun1` (eu-north-1)
+- `sf-netprofiler-lite-public-6f9c2e-euc1` (eu-central-1)
+- `sf-netprofiler-lite-public-6f9c2e-usw2` (us-west-2)
+- `sf-netprofiler-lite-public-6f9c2e-use1` (us-east-1)
+
+If you need to change these, set `NETPROFILER_BUCKET_BASE` during seeding and update the defaults.
+
 ## Run (Nix + Doppler)
 
 Run with Nix + Doppler so secrets are not written to disk:
 
 ```bash
 # Optional: set explicit bucket names.
-# If omitted, the seeder creates globally-unique names using a random suffix (no AWS account id).
-# To keep stable bucket names across runs, set a fixed base name:
-# export NETPROFILER_BUCKET_BASE=netprofiler-lite-<suffix>
+# If omitted, the seeder uses the distribution default base name.
+# To override, set:
+# export NETPROFILER_BUCKET_BASE=sf-netprofiler-lite-public-<suffix>
 # export BUCKET_EUN1=...
 # export BUCKET_EUC1=...
 # export BUCKET_USW2=...

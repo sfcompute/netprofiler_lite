@@ -10,12 +10,12 @@
 # - Public HTTP origin: "https://..." (CloudFront, R2 public origins like https://pub-<id>.r2.dev)
 
 backends = [
-  # S3 buckets (optional). These must be provided by the maintainer.
-  # Note: do not hardcode internal identifiers (e.g. AWS account ids) in distributed configs.
-  # "<bucket-eun1>:eu-north-1",
-  # "<bucket-euc1>:eu-central-1",
-  # "<bucket-usw2>:us-west-2",
-  # "<bucket-use1>:us-east-1",
+  # S3 buckets (public-read objects). These default buckets are seeded by SF Compute.
+  # They intentionally do NOT include any AWS account identifiers.
+  "sf-netprofiler-lite-public-6f9c2e-eun1:eu-north-1",
+  "sf-netprofiler-lite-public-6f9c2e-euc1:eu-central-1",
+  "sf-netprofiler-lite-public-6f9c2e-usw2:us-west-2",
+  "sf-netprofiler-lite-public-6f9c2e-use1:us-east-1",
 
   # Public R2 origins (example; replace with your public endpoints)
   "https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev",

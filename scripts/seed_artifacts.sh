@@ -402,7 +402,9 @@ bucket_defaults() {
 
   # Allow overriding the base name if desired (to keep stable buckets).
   local base
-  base="${NETPROFILER_BUCKET_BASE:-netprofiler-lite-$(random_suffix)}"
+  # Default base name matches the distribution defaults in netprofiler_lite.toml and flake.nix.
+  # It intentionally does NOT embed an AWS account id.
+  base="${NETPROFILER_BUCKET_BASE:-sf-netprofiler-lite-public-6f9c2e}"
 
   if [[ -z "$BUCKET_EUN1" ]]; then BUCKET_EUN1="${base}-eun1"; fi
   if [[ -z "$BUCKET_EUC1" ]]; then BUCKET_EUC1="${base}-euc1"; fi
