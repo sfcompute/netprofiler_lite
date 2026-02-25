@@ -1496,11 +1496,6 @@ fn endpoint_id(backend_type: BackendType, bucket_or_base: &str) -> String {
     }
 }
 
-fn gbps_to_mibs_per_sec(gbps: f64) -> f64 {
-    // MiB/s = (Gbps * 1e9 bits/s) / 8 / (1024*1024)
-    gbps * 1_000_000_000.0 / 8.0 / 1_048_576.0
-}
-
 fn backend_label(backend_type: BackendType, bucket_or_base: &str) -> &'static str {
     match backend_type {
         BackendType::S3 => "S3",
@@ -1605,7 +1600,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
     println!("Legend:");
     println!("- thrpt: total goodput in Gbps (successful bytes only)");
     println!("- win(a/p90/max): 1s window goodput samples in Gbps (stream-progress bytes)");
-    println!("- objMiB/s(p50/p90): per-success request MiB/s for a single object");
+    println!("- objGbps(p50/p90): per-success request goodput in Gbps for a single object");
     println!("- detail: reqms p50/p90 when healthy; otherwise error summary (e.g. 429=...,rl)\n");
 
     if let Some(p) = report_path {
@@ -1680,10 +1675,9 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             "region",
             "thrpt",
             "gr",
-            "GB",
             "ok%",
             "win(a/p90/max)",
-            "objMiB/s(p50/p90)",
+            "objGbps(p50/p90)",
             "detail",
         ]);
 
@@ -1718,7 +1712,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
                 ok_cell.fg(Color::Red)
             };
         }
-        let gb = (r.bytes as f64) / 1_000_000_000.0;
+        let _gb = (r.bytes as f64) / 1_000_000_000.0;
 
         let errs = errs_compact(r);
 
@@ -1731,14 +1725,10 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             )
         };
 
-        let obj_mib = if r.req_samples == 0 {
+        let obj_gbps = if r.req_samples == 0 {
             "-".to_string()
         } else {
-            format!(
-                "{:.1}/{:.1}",
-                gbps_to_mibs_per_sec(r.req_gbps_p50),
-                gbps_to_mibs_per_sec(r.req_gbps_p90)
-            )
+            format!("{:.2}/{:.2}", r.req_gbps_p50, r.req_gbps_p90)
         };
 
         let req_ms = if r.req_samples == 0 {
@@ -1789,10 +1779,9 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
             Cell::new(region),
             thrpt_cell,
             grade_cell,
-            Cell::new(format!("{:.1}", gb)),
             ok_cell,
             Cell::new(win),
-            Cell::new(obj_mib),
+            Cell::new(obj_gbps),
             Cell::new(detail),
         ]);
     }
