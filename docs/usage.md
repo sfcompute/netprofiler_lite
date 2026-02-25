@@ -2,7 +2,7 @@
 
 This doc contains details that are intentionally kept out of the README.
 
-Nix setup: `docs/nix.md`.
+Nix setup: [docs/nix.md](nix.md).
 
 ## CLI
 

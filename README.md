@@ -53,7 +53,7 @@ requests) will be smaller.
 
 Nix:
 
-Getting started with Nix: `docs/nix.md`
+Getting started with Nix: [docs/nix.md](docs/nix.md)
 
 ```bash
 nix run --accept-flake-config .#bench
@@ -76,7 +76,7 @@ cargo build --release
 ## Docs
 
 - Table of contents:
-- Nix setup: `docs/nix.md`
-- Usage (CLI flags, config, backends, credentials, troubleshooting): `docs/usage.md`
-- Preseeding objects (maintainers): `docs/preseed.md`
-- Releases (download + tag-based releases): `docs/release.md`
+- Nix setup: [docs/nix.md](docs/nix.md)
+- Usage (CLI flags, config, backends, credentials, troubleshooting): [docs/usage.md](docs/usage.md)
+- Preseeding objects (maintainers): [docs/preseed.md](docs/preseed.md)
+- Releases (download + tag-based releases): [docs/release.md](docs/release.md)

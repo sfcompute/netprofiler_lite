@@ -74,9 +74,9 @@ Or as a flake app:
 nix run .#seed --accept-flake-config
 ```
 
-Nix note: see `docs/nix.md`.
+Nix note: see [docs/nix.md](nix.md).
 
-Release process: see `docs/release.md`.
+Release process: see [docs/release.md](release.md).
 
 ## Seeding Speed Knobs
 
