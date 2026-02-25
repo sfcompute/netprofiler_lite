@@ -33,6 +33,15 @@ Credentialed operations are maintainer-only:
 
 ## Partner quickstart (recommended)
 
+0) Install Nix (Determininate Systems, non-interactive)
+
+```bash
+sudo curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+  | sh -s -- install --no-confirm
+
+. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+```
+
 1) Run with Nix (recommended)
 
 Print help:
