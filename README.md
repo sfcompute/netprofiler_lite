@@ -6,6 +6,15 @@ Small, shareable object-storage throughput benchmark.
 - Defaults (object sizing + grading thresholds) are informed by field experience and conversations with HPC/AI researchers.
 - Roadmap: evolve toward saturating an entire cluster (not just one host).
 
+## Table of Contents
+
+- [Quickstart](#quickstart)
+- [Docs](#docs)
+  - [`docs/nix.md`](docs/nix.md)
+  - [`docs/usage.md`](docs/usage.md)
+  - [`docs/preseed.md`](docs/preseed.md)
+  - [`docs/release.md`](docs/release.md)
+
 ## Quickstart
 
 Prebuilt binary (fastest):
