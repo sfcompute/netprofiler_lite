@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="560" viewBox="0 0 1400 560">
+  <rect x="0" y="0" width="1400" height="560" fill="#0b0f14" />
+
+  <style>
+    .t { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 18px; fill: #cbd5e1; }
+    .dim { fill: #94a3b8; }
+    .ok { fill: #86efac; }
+    .warn { fill: #fbbf24; }
+    .bad { fill: #fb7185; }
+    .accent { fill: #a78bfa; }
+  </style>
+
+  <text class="t" x="28" y="42">Config: conc=256 dur=15s prefix=data-8m files=100x8MB</text>
+
+  <text class="t dim" x="28" y="84">Legend:</text>
+  <text class="t dim" x="28" y="110">- thrpt: total goodput in Gbps (successful bytes only)</text>
+  <text class="t dim" x="28" y="136">- win(a|p90|max): 1s window goodput samples in Gbps (stream-progress bytes)</text>
+  <text class="t dim" x="28" y="162">- target_host: hostname contacted for the backend (Host/SNI)</text>
+
+  <text class="t dim" x="28" y="204">Report: netprofiler_lite_report.toml</text>
+
+  <text class="t" x="28" y="252">| dir      | type      | endpoint           | region       | target_host                        | thrpt | gr | ok%    | win(a|p90|max) |</text>
+  <text class="t" x="28" y="278">|----------|-----------|--------------------|--------------|------------------------------------|-------|----|--------|----------------|</text>
+
+  <text class="t" x="28" y="312">| download | S3        | s3:usw2            | us-west-2    | s3.us-west-2.amazonaws.com         | 8.20  |</text>
+  <text class="t warn" x="1044" y="312"> C</text>
+  <text class="t ok" x="1096" y="312">| 100.0%</text>
+  <text class="t" x="1188" y="312">| 9.3|9.5|9.5    |</text>
+
+  <text class="t" x="28" y="338">| download | S3        | s3:use1            | us-east-1    | s3.amazonaws.com                   | 7.16  |</text>
+  <text class="t warn" x="1044" y="338"> C</text>
+  <text class="t ok" x="1096" y="338">| 100.0%</text>
+  <text class="t" x="1188" y="338">| 8.9|9.4|9.5    |</text>
+
+  <text class="t" x="28" y="364">| download | S3        | s3:eun1            | eu-north-1   | s3.eu-north-1.amazonaws.com        | 5.21  |</text>
+  <text class="t warn" x="1044" y="364"> C</text>
+  <text class="t ok" x="1096" y="364">| 100.0%</text>
+  <text class="t" x="1188" y="364">| 6.3|7.6|8.0    |</text>
+
+  <text class="t" x="28" y="390">| download | R2-public | r2pub:pub-c0240... | -            |</text>
+  <text class="t accent" x="576" y="390"> pub-c02404be13b6...r2.dev</text>
+  <text class="t" x="920" y="390"> | 3.90  |</text>
+  <text class="t bad" x="1044" y="390"> D</text>
+  <text class="t bad" x="1096" y="390">| 0.4%</text>
+  <text class="t" x="1188" y="390">| 4.2|9.4|9.4    |</text>
+
+  <text class="t" x="28" y="416">| download | R2-public | r2pub:pub-0323b... | -            |</text>
+  <text class="t accent" x="576" y="416"> pub-0323b6896e3e...r2.dev</text>
+  <text class="t" x="920" y="416"> | 3.65  |</text>
+  <text class="t bad" x="1044" y="416"> D</text>
+  <text class="t bad" x="1096" y="416">| 0.4%</text>
+  <text class="t" x="1188" y="416">| 3.8|9.4|9.5    |</text>
+
+  <text class="t" x="28" y="442">| download | S3        | s3:euc1            | eu-central-1 | s3.eu-central-1.amazonaws.com      | 1.93  |</text>
+  <text class="t bad" x="1044" y="442"> D</text>
+  <text class="t ok" x="1096" y="442">| 100.0%</text>
+  <text class="t" x="1188" y="442">| 4.2|5.4|5.5    |</text>
+
+  <text class="t dim" x="28" y="488">download stats: endpoints=6 ok_rate=1.8% (8757/485.0K) rl_endpoints=2 zero_ok=0 | thrpt(avg/p90/min/max)=5.01/8.20/1.93/8.20Gbps</text>
+  <text class="t dim" x="28" y="520">Recommendation (download): s3:usw2 (s3.us-west-2.amazonaws.com) @ 8.201 Gbps</text>
+</svg>

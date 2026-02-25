@@ -67,6 +67,10 @@ cargo build --release
 ./target/release/netprofiler_lite
 ```
 
+## Example Output
+
+![Example results across backends](docs/results_example.svg)
+
 ## Docs
 
 - Table of contents:
