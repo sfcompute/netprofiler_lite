@@ -999,7 +999,11 @@ async fn run_download(
 ) -> Result<RunOutcome> {
     let sem = Arc::new(Semaphore::new(cfg.concurrency));
     let idx = Arc::new(AtomicUsize::new(0));
-    let bytes = Arc::new(AtomicU64::new(0));
+    // bytes_ok: only counts fully successful requests
+    let bytes_ok = Arc::new(AtomicU64::new(0));
+    // bytes_progress: counts bytes as they are consumed from the response stream
+    // (used for window sampling and progress so we don't get "completion bursts")
+    let bytes_progress = Arc::new(AtomicU64::new(0));
     let transfers = Arc::new(AtomicU64::new(0));
     let successes = Arc::new(AtomicU64::new(0));
     let http_non_success = Arc::new(AtomicU64::new(0));
@@ -1023,16 +1027,16 @@ async fn run_download(
     // Note: a small window can show bursty "max" due to buffering/completions.
     let sampler_task = {
         let stop = stop.clone();
-        let bytes = bytes.clone();
+        let bytes_progress = bytes_progress.clone();
         let window_gbps_samples = window_gbps_samples.clone();
         let until = until;
         tokio::spawn(async move {
-            let mut last = bytes.load(Ordering::Relaxed);
+            let mut last = bytes_progress.load(Ordering::Relaxed);
             let mut last_t = Instant::now();
             let tick = Duration::from_secs(1);
             while !stop.load(Ordering::Relaxed) && Instant::now() < until {
                 tokio::time::sleep(tick).await;
-                let now_b = bytes.load(Ordering::Relaxed);
+                let now_b = bytes_progress.load(Ordering::Relaxed);
                 let now_t = Instant::now();
                 let dt = now_t.duration_since(last_t).as_secs_f64().max(0.000_001);
                 let db = now_b.saturating_sub(last);
@@ -1047,7 +1051,7 @@ async fn run_download(
     };
     let progress_task = if cfg.progress {
         let stop = stop.clone();
-        let bytes = bytes.clone();
+        let bytes_progress = bytes_progress.clone();
         let transfers = transfers.clone();
         let successes = successes.clone();
         let label = label.to_string();
@@ -1056,7 +1060,7 @@ async fn run_download(
         Some(tokio::spawn(async move {
             while !stop.load(Ordering::Relaxed) {
                 let elapsed = start.elapsed().as_secs_f64().max(0.001);
-                let b = bytes.load(Ordering::Relaxed);
+                let b = bytes_progress.load(Ordering::Relaxed);
                 let t = transfers.load(Ordering::Relaxed);
                 let ok = successes.load(Ordering::Relaxed);
                 let gbps = (b as f64 * 8.0) / elapsed / 1_000_000_000.0;
@@ -1084,7 +1088,8 @@ async fn run_download(
         let http = http.clone();
         let urls = urls.clone();
         let idx = idx.clone();
-        let bytes = bytes.clone();
+        let bytes_ok = bytes_ok.clone();
+        let bytes_progress = bytes_progress.clone();
         let transfers = transfers.clone();
         let successes = successes.clone();
         let http_non_success = http_non_success.clone();
@@ -1123,11 +1128,15 @@ async fn run_download(
             let mut local: u64 = 0;
             while let Some(item) = stream.next().await {
                 let Ok(chunk) = item else {
+                    // roll back progress bytes for this request
+                    bytes_progress.fetch_sub(local, Ordering::Relaxed);
                     return;
                 };
-                local += chunk.len() as u64;
+                let n = chunk.len() as u64;
+                local += n;
+                bytes_progress.fetch_add(n, Ordering::Relaxed);
             }
-            bytes.fetch_add(local, Ordering::Relaxed);
+            bytes_ok.fetch_add(local, Ordering::Relaxed);
             successes.fetch_add(1, Ordering::Relaxed);
 
             let secs = req_start.elapsed().as_secs_f64().max(0.000_001);
@@ -1164,7 +1173,7 @@ async fn run_download(
     let _ = sampler_task.await;
 
     let elapsed = start.elapsed().as_secs_f64().max(0.001);
-    let total_bytes = bytes.load(Ordering::Relaxed);
+    let total_bytes = bytes_ok.load(Ordering::Relaxed);
     let total_transfers = transfers.load(Ordering::Relaxed);
     let total_success = successes.load(Ordering::Relaxed);
     let total_http_non_success = http_non_success.load(Ordering::Relaxed);
@@ -1593,7 +1602,7 @@ fn print_human(results: &CompareResult, no_color: bool, report_path: Option<&Pat
         results.config.file_size_mb
     );
 
-    println!("Metrics: thrpt_gbps(total), win_gbps(avg/p90/max, 1s samples), obj_mib_s+req_ms(p50/p90 per successful request)\n");
+    println!("Metrics: thrpt_gbps(total ok bytes), win_gbps(avg/p90/max, 1s stream samples), obj_mib_s+req_ms(p50/p90 per successful request)\n");
 
     if let Some(p) = report_path {
         println!("Report: {}\n", p.display());
