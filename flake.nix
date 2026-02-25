@@ -46,10 +46,38 @@
         apps.bench = flake-utils.lib.mkApp {
           drv = pkgs.writeShellApplication {
             name = "netprofiler_lite_bench";
-            runtimeInputs = [ pkgs.coreutils ];
+            runtimeInputs = [ pkgs.bash pkgs.coreutils ];
             text = ''
+              s3_backends=""
+
+              add_s3() {
+                local bucket="$1"
+                local region="$2"
+                if [ -n "$bucket" ]; then
+                  if [ -n "$s3_backends" ]; then
+                    s3_backends="$s3_backends,$bucket:$region"
+                  else
+                    s3_backends="$bucket:$region"
+                  fi
+                fi
+              }
+
+              # Optional S3 backends (public-read objects). Keep bucket names out of the repo.
+              add_s3 "''${NETPROFILER_S3_BUCKET_EUN1-}" "eu-north-1"
+              add_s3 "''${NETPROFILER_S3_BUCKET_EUC1-}" "eu-central-1"
+              add_s3 "''${NETPROFILER_S3_BUCKET_USW2-}" "us-west-2"
+              add_s3 "''${NETPROFILER_S3_BUCKET_USE1-}" "us-east-1"
+
+              r2_backends="https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev"
+
+              if [ -n "$s3_backends" ]; then
+                backends="$s3_backends,$r2_backends"
+              else
+                backends="$r2_backends"
+              fi
+
               exec "${self.packages.${system}.default}/bin/netprofiler_lite" \
-                --backends "https://pub-0323b6896e3e42cb8971495d2f9a2370.r2.dev,https://pub-c02404be13b644a1874a29231dfbe0d2.r2.dev" \
+                --backends "$backends" \
                 --direction download \
                 --concurrency 256 \
                 --duration 15 \

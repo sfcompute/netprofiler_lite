@@ -37,6 +37,16 @@ Run the default public endpoints (copy/paste):
 nix run --accept-flake-config .#bench
 ```
 
+To include S3 in the same run (no credentials needed, but bucket names must be provided by the maintainer):
+
+```bash
+export NETPROFILER_S3_BUCKET_EUN1="<public-bucket-eun1>"
+export NETPROFILER_S3_BUCKET_EUC1="<public-bucket-euc1>"
+export NETPROFILER_S3_BUCKET_USW2="<public-bucket-usw2>"
+export NETPROFILER_S3_BUCKET_USE1="<public-bucket-use1>"
+nix run --accept-flake-config .#bench
+```
+
 If you are running from GitHub (no checkout required):
 
 ```bash
