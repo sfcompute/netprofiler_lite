@@ -20,7 +20,7 @@ Small, shareable object-storage throughput benchmark.
 Prebuilt binary (fastest):
 
 ```bash
-version="$(curl -fsSL https://api.github.com/repos/kennethdsheridan/netprofiler_lite/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
+version="$(curl -fsSL https://api.github.com/repos/sfcompute/netprofiler_lite/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
 test -n "$version" || { echo "failed to detect latest version"; exit 1; }
 
 os="$(uname -s)"; arch="$(uname -m)"
@@ -29,7 +29,7 @@ case "${os}-${arch}" in
   *) echo "unsupported: ${os}-${arch}"; exit 1 ;;
 esac
 
-base="https://github.com/kennethdsheridan/netprofiler_lite/releases/latest/download"
+base="https://github.com/sfcompute/netprofiler_lite/releases/latest/download"
 curl -fsSL -O "${base}/${asset}" -O "${base}/${asset}.sha256" || {
   # Backward-compat: older releases used a glibc-linked linux artifact name.
   if [ "${os}-${arch}" = "Linux-x86_64" ]; then

@@ -18,7 +18,7 @@ elif [ -e "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
   . "$HOME/.nix-profile/etc/profile.d/nix.sh"
 fi
 
-nix run --accept-flake-config github:kennethdsheridan/netprofiler_lite#bench
+nix run --accept-flake-config github:sfcompute/netprofiler_lite#bench
 ```
 
 Install only:
